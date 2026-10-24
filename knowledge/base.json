@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "concepts": [
+    {"id":"project","aliases":["project","projects","initiative","initiatives","projekt"],"related":["repository","suite"],"definition":"An undertaking; not synonymous with its repository or directory."},
+    {"id":"repository","aliases":["repository","repositories","repo","repos","kodarkiv"],"related":["directory","project"],"definition":"Version-controlled source with its existing repository identity."},
+    {"id":"directory","aliases":["directory","directories","folder","folders","path","paths","katalog"],"related":["repository"],"definition":"Filesystem location; can move independently of project identity."},
+    {"id":"name","aliases":["name","names","naming","alias","aliases","rename","renamed","namn"],"related":["logo"]},
+    {"id":"logo","aliases":["logo","logos","icon","icons","favicon","visual identity","logotyp"],"related":["name"]},
+    {"id":"suite","aliases":["suite","software suite","product family"],"related":["fleet","project"]},
+    {"id":"fleet","aliases":["fleet","services","service fleet","flotta"],"related":["suite","deployment"]},
+    {"id":"flagship","aliases":["flagship","flagship project","flaggskepp"],"related":["importance"],"attributed":true},
+    {"id":"preference","aliases":["favorite","favourite","preferred","favorit"],"related":[],"attributed":true},
+    {"id":"urgency","aliases":["urgent","urgency","in acute need","acute need","akut","brådskande"],"related":["priority"],"attributed":true},
+    {"id":"priority","aliases":["priority","priorities","prio","prioritize","prioritise","prioritera","p0","p1","p2","high priority","low priority","top priority"],"related":["urgency","importance"],"attributed":true},
+    {"id":"importance","aliases":["valuable","important","importance","value","värdefull","viktig"],"related":["priority"],"attributed":true},
+    {"id":"deployment","aliases":["deployment","deploy","deployed","installation","installed","install"],"related":["fleet"]},
+    {"id":"roadmap","aliases":["roadmap","milestone","milestones","planned work","upcoming work","färdplan"],"related":["priority"]},
+    {"id":"agenda","aliases":["agenda","daily brief","daily briefing","daily report","dagordning"],"related":["roadmap","report"]},
+    {"id":"report","aliases":["report","reports","review","retrospective","recap","rapport","weekly review"],"related":["agenda"]},
+    {"id":"attestation","aliases":["attestation","attestations","signing","signed","digital signature","audit chain","tamper-safe","tamper evident"],"related":["evidence"]},
+    {"id":"evidence","aliases":["evidence","provenance","audit","audit trail","belägg"],"related":["attestation"]},
+    {"id":"logging","aliases":["logging","logs","log messages","log rotation","log-rotate","log-rotator","syslog","loggar"],"related":["observability"]},
+    {"id":"observability","aliases":["observability","health polling","health checks","monitoring","telemetry","övervakning"],"related":["logging"]},
+    {"id":"publishing","aliases":["publishing","publication","publish","typesetting","desktop publishing","publicering"],"related":["artifact"]},
+    {"id":"artifact","aliases":["artifact","artifacts","artefact","artefacts","rendered product"],"related":["publishing"]},
+    {"id":"phone","aliases":["phone","telephone","mobile","handset","telefon"],"related":["android"]},
+    {"id":"android","aliases":["android","adb","tethering"],"related":["phone"]},
+    {"id":"network","aliases":["network","networking","connectivity","nätverk"],"related":["mesh"]},
+    {"id":"mesh","aliases":["mesh","mesh networking","mesh network"],"related":["network"]},
+    {"id":"ssh","aliases":["ssh","secure shell","remote shell"],"related":["network"]},
+    {"id":"authorship","aliases":["authorship","author attribution","human ai authorship","human-authored","ai-authored"],"related":["publishing"]}
+  ],
+  "entities": [
+    {"id":"project:mneme","kind":"project","name":"Mneme","aliases":["mneme","ragbaz-mneme"],"relations":[{"predicate":"belongs_to","object":"suite:ragbaz"}]},
+    {"id":"project:nostoi","kind":"project","name":"Nostoi","aliases":["nostoi"],"relations":[{"predicate":"belongs_to","object":"suite:ragbaz"}]},
+    {"id":"project:frog","kind":"project","name":"Frog","aliases":["frog","ragbaz-frog"],"relations":[{"predicate":"belongs_to","object":"suite:ragbaz"}]},
+    {"id":"project:weftmark","kind":"project","name":"WeftMark","aliases":["weftmark"],"relations":[{"predicate":"belongs_to","object":"suite:ragbaz"}]},
+    {"id":"suite:ragbaz","kind":"suite","name":"RAGBAZ","aliases":["ragbaz","ragbaz suite","rebekah fleet"],"relations":[]}
+  ],
+  "assertions": [],
+  "candidate_aliases": [],
+  "policy": "Aliases are curated retrieval aids. Related concepts are not synonyms. Attributed properties need source-backed assertions. Never infer priority, truth or preference from frequency. Repository identifiers remain owned by Frog."
+}

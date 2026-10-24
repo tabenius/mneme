@@ -5,3 +5,9 @@
 *.lockfile
 .env
 /local/
+__pycache__/
+*.pyc
+*.npz
+*.pkl
+*.joblib
+/evaluation/private/

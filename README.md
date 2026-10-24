@@ -12,12 +12,20 @@ than manufacturing a narrative of successful work.
 - Global live notifications and up to eight recent-session log followers.
 - Reconnect/backoff, periodic reconciliation, atomic snapshots and checkpoints.
 - SQLite WAL, FTS5, source-qualified identities and content-hash deduplication.
-- Eight read-only stdio MCP tools, also callable from a JSON CLI.
+- Ten read-only stdio MCP tools, also callable from a JSON CLI.
+- Curated concepts/entities, source-attributed assertions and Stockholm temporal interpretation.
+- Optional local TF-IDF/LSA and hybrid search, with measured retrieval quality and grouped SVM/tree evaluation.
 - Parameterized filters, generation-bound keyset cursors, bounded output, query deadlines.
 
-No OpenCode plugin, source database changes, model calls, public listener or
+No OpenCode plugin, source database changes, external model API calls, public listener or
 cloud upload is required. OpenCode must already be running. The P0 adapter is
 OpenCode-only: Claude, Codex, and ChatGPT histories are not silently substituted.
+
+The original Rust literal/FTS path remains unchanged. The new ranked/concept
+tools use a small local Python worker; vector search additionally uses NumPy.
+See [semantic milestones](docs/SEMANTIC.md), [knowledge format](knowledge/README.md)
+and [retrieval evaluation](docs/RETRIEVAL-EVALUATION.md). Learned classifiers were
+evaluated but are not enabled as default retrieval filters.
 
 ## Build and collect
 
@@ -84,6 +92,8 @@ by upstream session fields. No arbitrary SQL or arbitrary file-reading tool exis
 | `history_get_tool_runs` | Recorded tool input, status and output excerpts |
 | `history_aggregate` | Typed grouping by project/model/agent/role/tool/status/day |
 | `history_index_status` | Counts, versions, freshness and limitations |
+| `history_explain_query` | Inspect aliases, entity links and resolved temporal bounds |
+| `history_get_knowledge` | Curated concepts/entities and source-attributed assertions |
 
 Run `mneme --db /path/to/index.sqlite mcp` as a local stdio MCP server. Diagnostics
 go to stderr. Tool results carry both text and structured JSON. All tools are
@@ -125,6 +135,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
 python3 scripts/smoke-mcp.py --binary target/debug/mneme --db /private/index.sqlite
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Tests use synthetic conversations. Live smoke tests print counts and timings,

@@ -36,3 +36,17 @@ schema version 2 and upgrades the initial local schema-1 foundation in place.
 
 Removing the MCP config and disabling this exact unit removes integration;
 private index data remains until explicitly deleted by the owner.
+
+## Optional semantic layer (0.2)
+
+Install numerical requirements in a suitable local Python environment and set
+`MNEME_PYTHON` to that interpreter. Set `MNEME_KNOWLEDGE` to an owner-only local
+knowledge file if private entity aliases/assertions are needed. Pass those same
+environment variables when registering the MCP command with `opencode mcp add
+--env KEY=value`; a collector environment file does not configure the MCP client.
+
+Build the initial model with `mneme --db PATH semantic-build`. After checking it,
+enable `mneme-semantic-refresh.timer` for hourly refreshes. Both semantic unit
+templates are installed without starting them by `scripts/install-local.sh`.
+The helper performs local numerical inference only. Do not publish the model
+manifest/vocabulary or frozen evaluation fixtures. See `docs/SEMANTIC.md`.

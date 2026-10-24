@@ -1,6 +1,7 @@
 pub mod api;
 pub mod collect;
 pub mod mcp;
+pub mod semantic;
 pub mod store;
 
 pub fn now_ms() -> i64 {

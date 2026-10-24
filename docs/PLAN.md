@@ -16,6 +16,11 @@ Host-specific inventory and timing measurements belong outside this repository.
 
 ## P1 (not claimed as P0)
 
+The first semantic milestones M1–M6 and the exploratory retrieval/SVM/tree
+evaluation are implemented in 0.2. See [semantic scope](SEMANTIC.md) and
+[measured quality](RETRIEVAL-EVALUATION.md). Further improvements below remain
+open; implementation completion is not a claim that retrieval quality is solved.
+
 - Additional harness adapters, starting with Claude Code and Codex.
 - Global model-request diagnostics; not equivalent to persisted session events.
 - Context-window navigation around a hit; branch-aware session comparison.

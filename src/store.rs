@@ -36,9 +36,9 @@ pub struct Query {
     pub agent: Option<String>,
     pub tool: Option<String>,
     pub status: Option<String>,
-    /// Literal text, or an FTS5 expression when mode=fts.
+    /// Literal text, an FTS5 expression in fts mode, or natural-language ranked query.
     pub query: Option<String>,
-    /// literal (default) searches literal text; fts accepts SQLite FTS5 syntax.
+    /// literal (default), fts, ranked_fts (OR/BM25), concept, semantic (local LSA), or hybrid.
     pub mode: Option<String>,
     /// Inclusive UTC Unix milliseconds. Applies to creation time except session listings (updated time).
     pub since_ms: Option<i64>,
@@ -53,6 +53,17 @@ pub struct Query {
     pub cursor: Option<String>,
     /// Required for aggregate: project, model, agent, role, tool, status, or day.
     pub group_by: Option<String>,
+    /// Ranked search temporal interval: today, yesterday, last_week, this_week, past_7_days, past_30_days.
+    pub time_frame: Option<String>,
+    /// Freeze personal temporal interpretation at UTC Unix milliseconds; defaults to now.
+    pub as_of_ms: Option<i64>,
+    /// Entity ID or exact alias for semantic search / knowledge lookup.
+    pub entity: Option<String>,
+    /// For knowledge assertions, e.g. priority, preference or flagship.
+    pub predicate: Option<String>,
+    pub asserted_by: Option<String>,
+    /// Include inferred assertions; false by default.
+    pub include_inferred: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -326,6 +337,19 @@ impl Store {
 
     pub fn query(&self, tool: &str, q: &Query) -> Result<Value> {
         validate(q)?;
+        if matches!(tool, "history_explain_query" | "history_get_knowledge")
+            || (tool == "history_search"
+                && matches!(
+                    q.mode.as_deref(),
+                    Some("ranked_fts" | "concept" | "semantic" | "hybrid")
+                ))
+        {
+            return crate::semantic::run(self, tool, q);
+        }
+        anyhow::ensure!(
+            q.time_frame.is_none() && q.entity.is_none() && q.predicate.is_none(),
+            "time_frame/entity/predicate require semantic search or knowledge tools"
+        );
         let c = self.reader()?;
         let generation: i64 =
             c.query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
@@ -333,6 +357,23 @@ impl Store {
             })?;
         let freshness = status(&c)?;
         if tool == "history_index_status" {
+            let mut freshness = freshness;
+            let manifest = self
+                .path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("semantic/manifest.json");
+            freshness["semantic_model"] = match std::fs::read(manifest) {
+                Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+                    Ok(v) => {
+                        json!({"method":v["method"],"documents":v["documents"],"dimensions":v["dimensions"],"built_at_ms":v["built_at_ms"],"corpus_hash":v["corpus_hash"],"coverage":"Local LSA snapshot; changed/deleted candidates are excluded at query time. Not a pretrained neural encoder."})
+                    }
+                    Err(_) => {
+                        json!({"error":"Semantic manifest is unreadable; rebuild the local model"})
+                    }
+                },
+                Err(_) => Value::Null,
+            };
             return Ok(freshness);
         }
         let mut signature = q.clone();
@@ -599,10 +640,11 @@ fn validate(q: &Query) -> Result<()> {
         "Only harness=opencode is indexed; no cross-harness fallback"
     );
     anyhow::ensure!(
-        q.mode
-            .as_deref()
-            .is_none_or(|m| matches!(m, "literal" | "fts")),
-        "mode must be literal or fts"
+        q.mode.as_deref().is_none_or(|m| matches!(
+            m,
+            "literal" | "fts" | "ranked_fts" | "concept" | "semantic" | "hybrid"
+        )),
+        "mode must be literal, fts, ranked_fts, concept, semantic or hybrid"
     );
     anyhow::ensure!(
         q.sort
