@@ -2,14 +2,17 @@
 
 ## P0 (release gate)
 
-1. Verify installed V2 API routes, authentication, pagination and log behavior.
-2. Backfill historical sessions/messages through GET-only APIs.
-3. Follow global/recent-session events, reconnect and reconcile missed notifications.
-4. Atomically commit snapshots, available event records and native sequence checkpoints.
-5. Provide all eight documented read-only MCP tools with bounded responses and provenance.
-6. Test rollback, replay, filtering, source separation, removal and cursor correctness.
-7. Exercise actual MCP negotiation/tool calls and benchmark representative live queries.
-8. Commit/push source, deploy a dedicated headless user service, register MCP, verify health.
+- [x] Verify installed V2 API routes, authentication, pagination and log behavior.
+- [x] Backfill historical sessions/messages through GET-only APIs.
+- [x] Follow global/recent-session events, reconnect and reconcile missed notifications.
+- [x] Atomically commit snapshots, available event records and native sequence checkpoints.
+- [x] Provide all eight documented read-only MCP tools with bounded responses and provenance.
+- [x] Test rollback, replay, filtering, source separation, removal and cursor correctness.
+- [x] Exercise actual MCP negotiation/tool calls and benchmark representative live queries.
+- [x] Commit/push source, deploy a dedicated headless user service, register MCP, verify health.
+
+Foundation release status: complete. See [release summary](RELEASE-0.1.md).
+Host-specific inventory and timing measurements belong outside this repository.
 
 ## P1 (not claimed as P0)
 
