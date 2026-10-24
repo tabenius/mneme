@@ -1,0 +1,22 @@
+[Unit]
+Description=Mneme local OpenCode history collector
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/mneme/collector.env
+ExecStart=%h/.local/bin/mneme collect --follow
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+KillMode=process
+TimeoutStopSec=150
+UMask=0077
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+LockPersonality=true
+MemoryMax=768M
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,7 @@
+/target/
+*.sqlite*
+*.db*
+*.jsonl
+*.lockfile
+.env
+/local/
