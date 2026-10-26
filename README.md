@@ -140,3 +140,10 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 Tests use synthetic conversations. Live smoke tests print counts and timings,
 not transcript contents. See [P0 acceptance plan](docs/PLAN.md).
+
+## Hypomnema evacuation (experimental)
+Mneme can produce minimal viable handoffs (MVH) for active projects to feed the hypomnema evacuation bundle sink in `ragbaz-dash`. See `docs/HYPOMNEMA.md` for the bundle format and `mneme evac` usage.
+
+Implemented explicit-input `evac build` and opt-in `evac push` usage, validation,
+privacy boundaries and limits are in [the producer guide](docs/HYPOMNEMA-LOCAL.md).
+The original Hypomnema document is a design draft, not deployment evidence.

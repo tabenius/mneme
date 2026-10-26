@@ -1,5 +1,6 @@
 pub mod api;
 pub mod collect;
+pub mod evac;
 pub mod mcp;
 pub mod semantic;
 pub mod store;

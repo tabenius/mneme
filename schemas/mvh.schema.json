@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hypomnema:mvh:v1",
+  "title": "Hypomnema explicit handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project", "worktree", "goal", "state", "open_files", "decisions", "blockers", "next_action", "verify", "refs", "last_verified_at"],
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 16384, "pattern": "\\S"},
+    "list": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/text"}}
+  },
+  "properties": {
+    "project": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"},
+    "worktree": {"$ref": "#/$defs/text"},
+    "goal": {"$ref": "#/$defs/text"},
+    "state": {"$ref": "#/$defs/text"},
+    "open_files": {"$ref": "#/$defs/list"},
+    "decisions": {"$ref": "#/$defs/list"},
+    "blockers": {"$ref": "#/$defs/list"},
+    "next_action": {"$ref": "#/$defs/text"},
+    "verify": {"$ref": "#/$defs/list"},
+    "refs": {"$ref": "#/$defs/list"},
+    "last_verified_at": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+  },
+  "$comment": "Rust validation additionally bounds UTF-8 byte lengths (not just JSON Schema character counts), input bytes and aggregate bytes. Claims are not verified; 0 means no supplied verification time."
+}

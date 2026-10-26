@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ragbaz_mneme::{
     api::Api,
-    collect,
+    collect, evac,
     mcp::History,
     store::{Query, Store, default_db},
 };
@@ -22,6 +22,11 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Produce a local evacuation bundle from explicit handoff JSON files only.
+    Evac {
+        #[command(subcommand)]
+        command: EvacCommand,
+    },
     /// Verify the installed API and backfill once, or collect continuously with --follow.
     Collect {
         #[arg(long, env = "MNEME_URL")]
@@ -51,11 +56,60 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum EvacCommand {
+    /// Explicitly upload a reviewed bundle; credentials are never discovered.
+    Push {
+        #[arg(long)]
+        bundle: PathBuf,
+        /// File containing a plain bearer token, not JSON.
+        #[arg(long)]
+        credential_file: PathBuf,
+        #[arg(long, default_value = evac::PUSH_ENDPOINT)]
+        endpoint: String,
+    },
+    /// Validate and bundle handoffs; no session scanning, network, or overwrite.
+    Build {
+        #[arg(long, required = true, num_args = 1..)]
+        input: Vec<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+        /// Caller-selected observation time, in Unix seconds (not verification).
+        #[arg(long)]
+        observed_at: u64,
+        #[arg(long, default_value = "evac")]
+        name: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     let store = Store::new(args.db.unwrap_or_else(default_db));
     match args.command {
+        Command::Evac {
+            command:
+                EvacCommand::Push {
+                    bundle,
+                    credential_file,
+                    endpoint,
+                },
+        } => {
+            let summary = evac::push(&bundle, &credential_file, &endpoint).await?;
+            println!("{}", serde_json::to_string(&summary)?);
+        }
+        Command::Evac {
+            command:
+                EvacCommand::Build {
+                    input,
+                    output,
+                    observed_at,
+                    name,
+                },
+        } => {
+            let summary = evac::build(&input, &output, &name, observed_at)?;
+            println!("{}", serde_json::to_string(&summary)?);
+        }
         Command::Collect {
             url,
             password_file,
