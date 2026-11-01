@@ -153,10 +153,13 @@ class RetrievalTests(unittest.TestCase):
             )
             texts = [
                 "quartz minerals crystallography",
-                "oranges citrus orchard",
-                "cobalt battery electrode",
-                "volcanic basalt mountain",
+                "oranges citrus orchard fruit harvest",
+                "cobalt battery electrode minerals quartz conductivity",
+                "volcanic basalt mountain minerals rock",
             ]
+            # Shared vocabulary avoids four orthogonal, equal-singular-value
+            # rows: truncating that degenerate corpus can create arbitrary
+            # collinear projections and platform-dependent cosine-score ties.
             for i, text in enumerate(texts):
                 c.execute(
                     "INSERT INTO messages VALUES(?,?,?,'user',?,?)",
