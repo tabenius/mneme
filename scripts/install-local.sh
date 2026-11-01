@@ -18,3 +18,4 @@ install -m 600 deploy/mneme-collector.service "$HOME/.config/systemd/user/mneme-
 install -m 600 deploy/mneme-semantic-refresh.service "$HOME/.config/systemd/user/mneme-semantic-refresh.service"
 install -m 600 deploy/mneme-semantic-refresh.timer "$HOME/.config/systemd/user/mneme-semantic-refresh.timer"
 echo "Installed Mneme $revision. No services were started or restarted."
+echo 'After changing OpenCode MCP configuration, save work and quit/relaunch OpenCode manually; this installer never restarts it.'

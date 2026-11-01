@@ -58,6 +58,37 @@ downloads/outputs, and the native musl matrix avoids slow emulated compilation.
 
 ## Source installation and collector setup
 
+### Configure without restarting OpenCode
+
+The installed OpenCode CLI and running API must be checked separately. Mneme's
+current collector requires V2 GET paths (`/api/info`, `/api/session`, projected
+messages, experimental session log, and events); OpenCode 1.x is not silently
+treated as compatible. A restart alone cannot add a missing API adapter.
+
+```sh
+# Prints only version/endpoint compatibility, never the credential or sessions.
+python3 scripts/check-opencode.py --url http://127.0.0.1:PORT --password-file /path/to/service.json
+# For a plain-text password file instead of JSON, add --password-format plain.
+
+# Configure MCP and start ONLY Mneme after a successful API preflight:
+python3 scripts/setup-local.py --url http://127.0.0.1:PORT \
+  --password-file /path/to/service.json --start-collector
+```
+
+Setup writes private Mneme configuration and preserves existing JSON OpenCode
+settings, backing up changed configurations. Existing JSONC is not overwritten or
+shadowed. On an incompatible server, no configuration is changed unless `--stage`
+is supplied; staging writes a **disabled** MCP entry and never starts collection.
+Do not describe this staged state as working ingestion.
+
+**OpenCode is never upgraded, stopped, or restarted by these scripts.** For the
+new MCP configuration to load, save work and manually quit/relaunch your OpenCode
+TUI. If using a systemd-managed web/server instance, manually restart only its
+known unit when ready, e.g. `systemctl --user restart rebekah-opencode-web.service`
+on the original Chromebook. `--opencode-unit NAME.service` merely prints that
+manual command; it does not execute it. Interactive callers may ask for explicit
+confirmation, but must not assume consent or restart by default.
+
 Source, private index and service configuration are separate. No transcript or
 credential belongs in Git. The installed release path is keyed by Git revision.
 

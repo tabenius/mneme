@@ -21,3 +21,4 @@ ln -s "$destination/mneme" "$link"
 mv -Tf "$link" "$HOME/.local/bin/mneme"
 echo "Installed Mneme $revision at $HOME/.local/bin/mneme"
 echo 'No services were started or restarted. Add ~/.local/bin to PATH if needed.'
+echo 'After changing OpenCode MCP configuration, save work and quit/relaunch OpenCode manually; this installer never restarts it.'
