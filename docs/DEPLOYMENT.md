@@ -1,5 +1,63 @@
 # Local deployment
 
+## GitHub-built binaries and Debian packages
+
+The `check` GitHub Actions workflow validates Rust/Python first, then produces
+native x86_64 and aarch64 **static musl** binaries, `.tar.gz` installation bundles,
+`.deb` packages (`amd64`/`arm64`) and SHA-256 checksums. Pushes and manual runs
+build packages; PRs run checks only. Artifacts are retained for 30 days. A pushed
+`vVERSION` tag matching `Cargo.toml` additionally publishes a GitHub Release.
+Ordinary branch builds use `VERSION+git.COMMIT` package versions.
+
+No Rust compiler is needed on the installation host. From a checkout:
+
+```sh
+# Uses gh authentication for this private repository and verifies checksums/revision.
+bash scripts/install-github.sh --ref economy
+# Or pin an already-successful build:
+bash scripts/install-github.sh --run RUN_ID
+mneme --version
+```
+
+The default branch selection is `main`; use `--ref economy` until the workflow
+changes are merged. Installation points `~/.local/bin/mneme` to a revision-keyed
+release and installs user service templates without starting/restarting services.
+Add `~/.local/bin` to PATH if necessary. This does not register MCP or collect data.
+
+For direct artifact/package installation:
+
+```sh
+gh run download RUN_ID --repo tabenius/mneme --name mneme-x86_64-unknown-linux-musl --dir mneme-download
+cd mneme-download
+sha256sum --check SHA256SUMS-x86_64-unknown-linux-musl
+# User-local, no root:
+tar -xzf mneme-*-x86_64-unknown-linux-musl.tar.gz
+bash mneme-*-x86_64-unknown-linux-musl/install.sh
+# Alternative: system-managed Debian installation, not an additional required step:
+sudo apt install ./mneme_*_amd64.deb
+```
+
+Choose `aarch64-unknown-linux-musl`/`arm64` on ARM Linux. Releases provide the same
+assets via `gh release download --repo tabenius/mneme --pattern ...` after a version
+tag is published. Check matching checksum files before extracting/installing.
+
+Debian installs `/usr/bin/mneme`, documentation, and user service templates under
+`/usr/lib/systemd/user`, with `/usr/bin/mneme` ExecStart paths. It contains no
+maintainer script that starts services. Avoid enabling both a pre-existing
+user-local unit and a system-provided unit unintentionally: user-local units take
+precedence. Private indexes/configuration stay in the user's existing directories
+and are not package payloads. Optional semantic commands still need an appropriate
+Python environment (`MNEME_PYTHON`); NumPy is not bundled into the Rust binary.
+
+### Building packages in CI
+
+`scripts/package-release.sh BINARY TARGET OUTPUT_DIR` packages an already-built
+binary without network, collection or service access. The existing
+`scripts/install-local.sh` remains a source-build alternative. GitHub caches Cargo
+downloads/outputs, and the native musl matrix avoids slow emulated compilation.
+
+## Source installation and collector setup
+
 Source, private index and service configuration are separate. No transcript or
 credential belongs in Git. The installed release path is keyed by Git revision.
 

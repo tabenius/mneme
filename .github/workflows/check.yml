@@ -1,13 +1,23 @@
 name: check
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mneme-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
@@ -16,3 +26,79 @@ jobs:
           python-version: '3.12'
       - run: pip install -r evaluation/requirements.txt
       - run: python -m unittest discover -s tests -p 'test_*.py'
+  packages:
+    if: github.event_name != 'pull_request'
+    needs: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build portable static binary
+        env:
+          CC: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --locked --target '${{ matrix.target }}'
+      - name: Check binary and create packages
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          binary="target/$TARGET/release/mneme"
+          "$binary" --version
+          file "$binary"
+          if readelf -l "$binary" | grep -q INTERP; then
+            echo 'Expected a static binary without an ELF interpreter' >&2
+            exit 1
+          fi
+          bash scripts/package-release.sh "$binary" "$TARGET" dist
+      - name: Verify Debian and archive installs without starting services
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/deb-root" "$RUNNER_TEMP/tar-root" "$RUNNER_TEMP/install-home"
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --extract dist/*.deb "$RUNNER_TEMP/deb-root"
+          "$RUNNER_TEMP/deb-root/usr/bin/mneme" --version
+          tar -xzf dist/*"$TARGET".tar.gz -C "$RUNNER_TEMP/tar-root"
+          HOME="$RUNNER_TEMP/install-home" bash "$RUNNER_TEMP"/tar-root/mneme-*/install.sh
+          "$RUNNER_TEMP/install-home/.local/bin/mneme" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mneme-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mneme-*
+          path: dist
+          merge-multiple: true
+      - name: Publish tagged packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --verify-tag --generate-notes
