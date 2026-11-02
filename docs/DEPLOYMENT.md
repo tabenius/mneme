@@ -13,14 +13,14 @@ No Rust compiler is needed on the installation host. From a checkout:
 
 ```sh
 # Uses gh authentication for this private repository and verifies checksums/revision.
-bash scripts/install-github.sh --ref economy
+bash scripts/install-github.sh --ref main
 # Or pin an already-successful build:
 bash scripts/install-github.sh --run RUN_ID
 mneme --version
 ```
 
-The default branch selection is `main`; use `--ref economy` until the workflow
-changes are merged. Installation points `~/.local/bin/mneme` to a revision-keyed
+The default branch selection is `main`; use `--ref BRANCH` only when deliberately
+installing another branch's successful build. Installation points `~/.local/bin/mneme` to a revision-keyed
 release and installs user service templates without starting/restarting services.
 Add `~/.local/bin` to PATH if necessary. This does not register MCP or collect data.
 
