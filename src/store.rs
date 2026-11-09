@@ -75,8 +75,6 @@ struct Cursor {
 }
 
 const SCHEMA: &str = r#"
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT OR IGNORE INTO meta VALUES('generation',0);
 CREATE TABLE IF NOT EXISTS sources(
@@ -145,10 +143,15 @@ impl Store {
         }
         #[cfg(not(unix))]
         options.open(&self.path)?;
-        let c = self.writer()?;
-        let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let mut c = self.writer()?;
+        // WAL mode cannot change inside a transaction. Schema creation and its
+        // version marker must, however, survive a crash together.
+        c.pragma_update(None, "journal_mode", "WAL")?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let version: i64 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
         anyhow::ensure!(version <= 2, "Index schema is newer than this binary");
-        c.execute_batch(SCHEMA)?;
+        tx.execute_batch(SCHEMA)?;
+        tx.commit()?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -157,13 +160,16 @@ impl Store {
         Ok(())
     }
     fn writer(&self) -> Result<Connection> {
-        let c = Connection::open(&self.path)?;
+        // Only init() may create an index. A disappeared index must not be
+        // silently replaced by an empty database during a health/checkpoint write.
+        let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         c.busy_timeout(Duration::from_secs(5))?;
-        c.execute_batch("PRAGMA foreign_keys=ON;")?;
+        c.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
         Ok(c)
     }
     fn reader(&self) -> Result<Connection> {
-        let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .context("Cannot read index; run mneme collect and check collector health")?;
         c.busy_timeout(Duration::from_secs(3))?;
         c.execute_batch("PRAGMA query_only=ON; BEGIN;")?;
         let deadline = std::time::Instant::now() + Duration::from_secs(3);

@@ -18,6 +18,12 @@ pub fn lock(store: &Store) -> Result<std::fs::File> {
 
 pub async fn once(api: &Api, store: &Store, source: &str, force: bool) -> Result<Vec<Value>> {
     let sessions = api.sessions().await?;
+    let mut ids = std::collections::HashSet::new();
+    for session in &sessions {
+        let sid = session["id"].as_str().context("session missing id")?;
+        crate::api::validate_id(sid)?;
+        anyhow::ensure!(ids.insert(sid), "Duplicate session in API inventory");
+    }
     let mut recent: Vec<&Value> = sessions.iter().collect();
     recent.sort_by_key(|s| {
         std::cmp::Reverse(
@@ -70,14 +76,39 @@ pub async fn run(api: Api, store: Store, source: String, interval_secs: u64) -> 
     );
     store.init()?;
     let _lock = lock(&store)?;
-    let info = api.verify().await?;
-    store.source(&source, info["version"].as_str().unwrap_or("unknown"))?;
+    store.source(&source, "unknown")?;
+    store.health(
+        &source,
+        Some("Collector starting; upstream verification pending"),
+    )?;
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+    let mut delay = 1;
+    loop {
+        let verification = tokio::select! {
+            _ = &mut shutdown => return Ok(()),
+            result = api.verify() => result,
+        };
+        match verification {
+            Ok(info) => {
+                store.source(&source, info["version"].as_str().unwrap_or("unknown"))?;
+                break;
+            }
+            Err(error) => {
+                store.health(&source, Some("Upstream verification failed; retrying"))?;
+                eprintln!("upstream verification failed: {error}; retrying in {delay}s");
+                tokio::select! {
+                    _ = &mut shutdown => return Ok(()),
+                    _ = tokio::time::sleep(Duration::from_secs(delay)) => {},
+                }
+                delay = (delay * 2).min(30);
+            }
+        }
+    }
     let (tx, mut rx) = mpsc::channel(1);
     let global = spawn_follow(api.clone(), store.clone(), source.clone(), None, tx.clone());
-    let mut followers = HashMap::<String, JoinHandle<()>>::new();
+    let mut followers = HashMap::<String, AbortOnDrop>::new();
     let mut last_force = std::time::Instant::now() - Duration::from_secs(61);
-    let shutdown = tokio::signal::ctrl_c();
-    tokio::pin!(shutdown);
     loop {
         let force = last_force.elapsed() >= Duration::from_secs(60);
         let result = tokio::select! {
@@ -101,14 +132,7 @@ pub async fn run(api: Api, store: Store, source: String, interval_secs: u64) -> 
                     .take(8)
                     .filter_map(|s| s["id"].as_str().map(str::to_owned))
                     .collect();
-                followers.retain(|sid, handle| {
-                    if desired.contains(sid) {
-                        true
-                    } else {
-                        handle.abort();
-                        false
-                    }
-                });
+                followers.retain(|sid, handle| desired.contains(sid) && !handle.0.is_finished());
                 for sid in desired {
                     followers.entry(sid.clone()).or_insert_with(|| {
                         spawn_follow(
@@ -142,14 +166,34 @@ pub async fn run(api: Api, store: Store, source: String, interval_secs: u64) -> 
             }
         }
     }
-    global.abort();
-    for (_, handle) in followers {
-        handle.abort();
-    }
+    drop(global);
+    drop(followers);
     store.health(
         &source,
         Some("Collector stopped; queryable snapshots retained"),
     )?;
+    Ok(())
+}
+
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn shutdown_signal() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            _ = term.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await?;
     Ok(())
 }
 
@@ -159,8 +203,8 @@ fn spawn_follow(
     source: String,
     sid: Option<String>,
     tx: mpsc::Sender<()>,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
+) -> AbortOnDrop {
+    AbortOnDrop(tokio::spawn(async move {
         let mut delay = 1;
         loop {
             let after = sid
@@ -177,5 +221,5 @@ fn spawn_follow(
             tokio::time::sleep(Duration::from_secs(delay)).await;
             delay = (delay * 2).min(30);
         }
-    })
+    }))
 }

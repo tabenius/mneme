@@ -125,3 +125,133 @@ fn remote_endpoints_and_identifier_traversal_are_rejected() {
     assert!(Api::new("https://example.com", std::path::Path::new("unused")).is_err());
     assert!(ragbaz_mneme::api::validate_id("../secret").is_err());
 }
+
+async fn pages_server(pages: Vec<Value>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        for page in pages {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let mut buffer = [0; 4096];
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let body = page.to_string();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        }
+    });
+    (url, task)
+}
+
+#[tokio::test]
+async fn empty_intermediate_page_does_not_truncate_inventory() {
+    let dir = tempfile::tempdir().unwrap();
+    let credential = dir.path().join("credential.json");
+    std::fs::write(&credential, r#"{"password":"synthetic"}"#).unwrap();
+    let (url, server) = pages_server(vec![
+        json!({"data":[],"cursor":{"next":"second"}}),
+        json!({"data":[{"id":"ses_kept"}],"cursor":{"next":null}}),
+    ])
+    .await;
+    let api = Api::new(&url, &credential).unwrap();
+    assert_eq!(
+        api.sessions().await.unwrap(),
+        vec![json!({"id":"ses_kept"})]
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_cursor_never_hides_previously_indexed_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let credential = dir.path().join("credential.json");
+    std::fs::write(&credential, r#"{"password":"synthetic"}"#).unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    store.init().unwrap();
+    store.source("mock", "2.mock").unwrap();
+    store
+        .ingest("mock", &json!({"id":"ses_kept"}), &[], &[])
+        .unwrap();
+    let (url, server) = pages_server(vec![json!({"data":[],"cursor":{"next":42}})]).await;
+    let api = Api::new(&url, &credential).unwrap();
+    assert!(collect::once(&api, &store, "mock", false).await.is_err());
+    let listing = store
+        .query("history_list_sessions", &Query::default())
+        .unwrap();
+    assert_eq!(listing["items"].as_array().unwrap().len(), 1);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn collector_retries_initial_outage_and_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let credential = dir.path().join("credential.json");
+    std::fs::write(&credential, r#"{"password":"synthetic"}"#).unwrap();
+    // Reserve an endpoint, then release it to simulate an upstream that starts late.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let api = Api::new(&format!("http://{address}"), &credential).unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    let collector = tokio::spawn(collect::run(api, store.clone(), "mock".into(), 2));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        !collector.is_finished(),
+        "startup outage must not terminate the collector"
+    );
+    let listener = TcpListener::bind(address).await.unwrap();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut bytes = Vec::new();
+                while !bytes.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let mut buffer = [0; 4096];
+                    let count = socket.read(&mut buffer).await.unwrap();
+                    if count == 0 {
+                        return;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let request = String::from_utf8_lossy(&bytes);
+                let body = if request.starts_with("GET /api/info ") {
+                    json!({"version":"2.mock"})
+                } else if request.starts_with("GET /openapi.json ") {
+                    json!({"paths":{
+                        "/api/session":{"get":{}},"/api/session/{sessionID}/message":{"get":{}},
+                        "/api/experimental/session/{sessionID}/log":{"get":{}},"/api/event":{"get":{}}
+                    }})
+                } else {
+                    json!({"data":[],"cursor":{"next":null}})
+                }.to_string();
+                let _ = socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+            });
+        }
+    });
+    let recovered = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        loop {
+            let status = store
+                .query("history_index_status", &Query::default())
+                .unwrap();
+            if status["sources"][0]["connection"] == "connected" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    collector.abort();
+    let _ = collector.await;
+    server.abort();
+    assert!(
+        recovered.is_ok(),
+        "collector did not recover when upstream became available"
+    );
+    assert!(
+        collect::lock(&store).is_ok(),
+        "cancelled collector must release its writer lock"
+    );
+}

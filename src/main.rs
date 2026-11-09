@@ -137,10 +137,9 @@ async fn main() -> Result<()> {
             }
         }
         Command::Mcp => {
-            anyhow::ensure!(
-                store.path.exists(),
-                "Index missing; run mneme collect first"
-            );
+            // Discovery must work even while the collector is unavailable or
+            // creating its first index. Each call opens the index afresh and
+            // reports errors without terminating the MCP transport.
             let service = History { store }.serve(rmcp::transport::stdio()).await?;
             service.waiting().await?;
         }

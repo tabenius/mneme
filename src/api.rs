@@ -23,6 +23,10 @@ impl Api {
             "P0 collector only accepts a loopback OpenCode endpoint"
         );
         anyhow::ensure!(
+            matches!(base.scheme(), "http" | "https"),
+            "Expected an HTTP(S) endpoint"
+        );
+        anyhow::ensure!(
             base.username().is_empty() && base.password().is_none(),
             "URL credentials are forbidden"
         );
@@ -31,9 +35,12 @@ impl Api {
             .as_str()
             .context("service credential file needs password")?
             .to_owned();
+        anyhow::ensure!(!password.is_empty(), "service credential password is empty");
         Ok(Self {
             client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(5))
+                .read_timeout(Duration::from_secs(60))
+                .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             base,
@@ -50,7 +57,7 @@ impl Api {
     }
 
     pub async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
-        let response = self
+        let mut response = self
             .request(path, query)?
             .timeout(Duration::from_secs(120))
             .send()
@@ -61,7 +68,15 @@ impl Api {
             "OpenCode GET {path}: {}",
             response.status()
         );
-        Ok(response.json().await?)
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            anyhow::ensure!(
+                bytes.len() + chunk.len() <= 32 * 1024 * 1024,
+                "OpenCode JSON response exceeds 32 MiB"
+            );
+            bytes.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&bytes).context("OpenCode returned invalid JSON")
     }
 
     pub async fn verify(&self) -> Result<Value> {
@@ -105,11 +120,14 @@ impl Api {
             let rows = page["data"]
                 .as_array()
                 .context("API page missing data array")?;
-            if rows.is_empty() {
-                break;
-            }
             result.extend(rows.iter().cloned());
-            cursor = page["cursor"]["next"].as_str().map(str::to_owned);
+            // A malformed continuation must never masquerade as a complete
+            // inventory (which would hide sessions during reconciliation).
+            cursor = match &page["cursor"]["next"] {
+                Value::Null => None,
+                Value::String(next) if !next.is_empty() => Some(next.clone()),
+                _ => bail!("API returned an invalid pagination cursor"),
+            };
             let Some(c) = cursor.as_ref() else {
                 break;
             };
@@ -137,7 +155,19 @@ impl Api {
             "session.log: {}",
             response.status()
         );
-        let mut stream = response.bytes_stream().eventsource();
+        let mut received = 0usize;
+        let mut stream = response
+            .bytes_stream()
+            .map(move |chunk| {
+                let chunk = chunk?;
+                received = received.saturating_add(chunk.len());
+                anyhow::ensure!(
+                    received <= 32 * 1024 * 1024,
+                    "Session log exceeds 32 MiB; checkpoint retained"
+                );
+                Ok::<_, anyhow::Error>(chunk)
+            })
+            .eventsource();
         let mut rows = Vec::new();
         while let Some(event) = stream.next().await {
             let event = event?;
@@ -176,7 +206,21 @@ impl Api {
             "event stream: {}",
             response.status()
         );
-        let mut stream = response.bytes_stream().eventsource();
+        // Rotate long-lived streams before an unterminated SSE event can grow
+        // without bound. Reconciliation, not notifications, owns checkpoints.
+        let mut received = 0usize;
+        let mut stream = response
+            .bytes_stream()
+            .map(move |chunk| {
+                let chunk = chunk?;
+                received = received.saturating_add(chunk.len());
+                anyhow::ensure!(
+                    received <= 32 * 1024 * 1024,
+                    "Event stream rotation required"
+                );
+                Ok::<_, anyhow::Error>(chunk)
+            })
+            .eventsource();
         while let Some(event) = stream.next().await {
             let event = event?;
             if event.event == "effect/http-api/stream/failure" {

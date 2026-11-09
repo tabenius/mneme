@@ -132,6 +132,40 @@ fn atomic_failure_keeps_checkpoint_and_messages() {
         2
     );
 }
+
+#[test]
+fn interrupted_schema_initialization_rolls_back_and_can_be_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    let connection = rusqlite::Connection::open(&store.path).unwrap();
+    // Force a failure halfway through schema creation, after meta/sessions.
+    connection
+        .execute_batch("PRAGMA user_version=1; CREATE TABLE messages(invalid INTEGER);")
+        .unwrap();
+    assert!(store.init().is_err());
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 1);
+    let partial: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('meta','sessions')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        partial, 0,
+        "failed initialization must not leave a partial schema"
+    );
+    connection.execute_batch("DROP TABLE messages;").unwrap();
+    store.init().unwrap();
+    assert!(
+        store
+            .query("history_index_status", &Query::default())
+            .is_ok()
+    );
+}
 #[test]
 fn replay_is_idempotent_and_unknown_events_are_preserved() {
     let (_d, s) = fixture();

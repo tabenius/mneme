@@ -126,6 +126,35 @@ schema version 2 and upgrades the initial local schema-1 foundation in place.
 Removing the MCP config and disabling this exact unit removes integration;
 private index data remains until explicitly deleted by the owner.
 
+## Failure recovery
+
+- MCP negotiation and tool discovery work before the first index exists. Data
+  calls return tool errors until collection creates a readable index. The same
+  MCP connection recovers on the next call after the index is repaired; it never
+  creates an empty replacement or deletes a damaged index.
+- The continuous collector retries initial API verification with exponential
+  backoff (1–30 seconds), marking source health degraded. An incompatible API
+  remains degraded; retries do not add support for older OpenCode contracts.
+  Single-pass collection still fails immediately with a nonzero exit status.
+- SIGINT and SIGTERM shut down the collector. SIGKILL/process crashes release
+  the OS-held writer lock; a remaining `.lockfile` is normal and need not be
+  removed. Restart only `mneme-collector.service` after a failure.
+- SQLite uses WAL with full synchronization. Schema initialization is atomic;
+  snapshots, event records and checkpoints commit together. Do not remove WAL
+  files or copy only the main database while a writer is active.
+- Upstream reads time out after 60 seconds without bytes; finite requests have
+  a 120-second total deadline. Individual JSON/log responses are capped at
+  32 MiB. Notification streams rotate at that byte budget and reconcile again.
+  These failures retain checkpoints for retry. Invalid continuation cursors
+  fail collection rather than treating a partial inventory as complete.
+- MCP admits at most four concurrent query workers. Excess calls receive a
+  retryable tool error. Semantic helpers have a 15-second deadline including
+  input transfer, bounded output, and are killed/reaped on failure.
+
+Check `mneme status` for source errors, reconciliation age and `stale` before
+relying on query coverage. A successful MCP handshake alone does not establish
+that collection is running or current.
+
 ## Optional semantic layer (0.2)
 
 Install numerical requirements in a suitable local Python environment and set

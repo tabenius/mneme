@@ -5,6 +5,10 @@ use rmcp::{
 };
 use serde_json::json;
 
+// Reject overload before scheduling blocking SQLite/Python work. Holding the
+// permit inside the worker also bounds work after a caller disconnects.
+static QUERY_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+
 #[derive(Clone)]
 pub struct History {
     pub store: Store,
@@ -13,7 +17,18 @@ pub struct History {
 impl History {
     async fn execute(&self, name: &'static str, q: Query) -> CallToolResult {
         let store = self.store.clone();
-        let result = tokio::task::spawn_blocking(move || store.query(name, &q)).await;
+        let result = match QUERY_SLOTS.try_acquire() {
+            Ok(permit) => {
+                tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    store.query(name, &q)
+                })
+                .await
+            }
+            Err(_) => Ok(Err(anyhow::anyhow!(
+                "Query capacity reached; retry shortly"
+            ))),
+        };
         let (value, error) = match result {
             Ok(Ok(value)) => (value, false),
             Ok(Err(error)) => (
