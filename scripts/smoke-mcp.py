@@ -55,7 +55,7 @@ with subprocess.Popen(
     send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tools = response()["tools"]
-    assert len(tools) == 10
+    assert len(tools) == 11
     assert all(t["annotations"]["readOnlyHint"] for t in tools)
 
     def call(name, arguments):
@@ -74,6 +74,9 @@ with subprocess.Popen(
     listing = call("history_list_sessions", {"limit": 1})
     assert listing["items"], "Index has no sessions"
     sid = listing["items"][0]["session_id"]
+    first = call("history_get_messages", {"session_id": sid, "limit": 1, "sort": "created_asc"})
+    if first["items"]:
+        call("history_get_context", {"session_id": sid, "message_id": first["items"][0]["message_id"], "window": 1})
     for name, arguments in [
         ("history_get_session", {"session_id": sid}),
         ("history_get_messages", {"session_id": sid, "limit": 1}),
@@ -94,7 +97,7 @@ with subprocess.Popen(
             {
                 "mcp_handshake": "passed",
                 "tools": len(tools),
-                "calls": 13 if args.semantic else 10,
+                "calls": (13 if args.semantic else 10) + (2 if first["items"] else 1),
                 "read_only_annotations": True,
             }
         )

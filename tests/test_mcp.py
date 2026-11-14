@@ -99,7 +99,7 @@ class McpRecovery(unittest.TestCase):
                     "clientInfo": {"name": "recovery-test", "version": "1"},
                 }, 1)
                 request("notifications/initialized", {}, None)
-                self.assertEqual(len(request("tools/list", {}, 2)["tools"]), 10)
+                self.assertEqual(len(request("tools/list", {}, 2)["tools"]), 11)
                 self.assertTrue(status(3)["isError"])
                 self.assertFalse(db.exists(), "MCP must not create an empty index")
                 db.write_bytes(b"synthetic corruption")

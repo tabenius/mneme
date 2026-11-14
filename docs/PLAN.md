@@ -23,7 +23,9 @@ open; implementation completion is not a claim that retrieval quality is solved.
 
 - Additional harness adapters, starting with Claude Code and Codex.
 - Global model-request diagnostics; not equivalent to persisted session events.
-- Context-window navigation around a hit; branch-aware session comparison.
+- [x] Context-window navigation around a hit (`history_get_context`).
+- Branch-aware session comparison.
+- [x] Consistent owner-validated index snapshots (`mneme snapshot create|verify|restore`).
 - Full tool-output pagination and literal-search acceleration if measured necessary.
 - Independently verified token/cost analytics, summaries and semantic search.
 - General filtered aggregation DSL, top-N ranked relevance and persistent query snapshots.

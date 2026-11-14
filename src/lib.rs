@@ -1,4 +1,5 @@
 pub mod api;
+pub mod archive;
 pub mod collect;
 pub mod evac;
 pub mod mcp;

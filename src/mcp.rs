@@ -135,6 +135,19 @@ impl History {
     }
 
     #[tool(
+        description = "Read the messages immediately before and after one message (session_id + message_id, window 1..10) to see a search hit in context. Bounded; evidence only.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn history_get_context(&self, Parameters(q): Parameters<Query>) -> CallToolResult {
+        self.execute("history_get_context", q).await
+    }
+
+    #[tool(
         description = "Find indexed tool executions, status, bounded input/output and source message references. Recorded tool status is not proof of external deployment or effects.",
         annotations(
             read_only_hint = true,
