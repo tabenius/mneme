@@ -100,10 +100,29 @@ class McpRecovery(unittest.TestCase):
                 }, 1)
                 request("notifications/initialized", {}, None)
                 self.assertEqual(len(request("tools/list", {}, 2)["tools"]), 10)
-                self.assertTrue(status(3)["isError"])
+                missing = status(3)
+                self.assertFalse(missing["isError"])
+                self.assertEqual(missing["structuredContent"]["state"], "missing")
+                self.assertFalse(missing["structuredContent"]["ok"])
+                self.assertIn(
+                    "mneme-collector", missing["structuredContent"]["remedy"]
+                )
+                # Data tools still fail, with a stable machine-readable code.
+                data = request(
+                    "tools/call",
+                    {"name": "history_list_sessions", "arguments": {}},
+                    30,
+                )
+                self.assertTrue(data["isError"])
+                self.assertEqual(data["structuredContent"]["code"], "index_missing")
                 self.assertFalse(db.exists(), "MCP must not create an empty index")
                 db.write_bytes(b"synthetic corruption")
-                self.assertTrue(status(4)["isError"])
+                corrupt = status(4)
+                self.assertFalse(corrupt["isError"])
+                self.assertEqual(
+                    corrupt["structuredContent"]["state"], "unreadable"
+                )
+                self.assertTrue(corrupt["structuredContent"]["index"]["exists"])
                 db.unlink()
                 credential = Path(directory) / "credential.json"
                 credential.write_text('{"password":"synthetic"}')
