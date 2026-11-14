@@ -183,7 +183,7 @@ impl History {
     }
 
     #[tool(
-        description = "Get indexed metadata for session_id; supply source when IDs may collide. Returns parent, usage and coverage; retrieve transcript separately.",
+        description = "Get indexed metadata for session_id; supply source when IDs may collide. Returns parent, usage and coverage; retrieve transcript separately. Includes the parent chain (ancestors) and child sessions such as sub-agent runs.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,

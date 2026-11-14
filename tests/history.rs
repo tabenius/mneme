@@ -439,3 +439,64 @@ fn long_tool_output_pages_back_exactly() {
             .unwrap();
     assert!(store.query("history_get_messages", &bad).is_err());
 }
+
+#[test]
+fn get_session_returns_parent_chain_and_children() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    store.init().unwrap();
+    store.source("fixture", "2.test").unwrap();
+    let session = |id: &str, parent: Option<&str>, created: i64| {
+        let mut s = json!({"id":id,"projectID":"p","title":format!("title {id}"),"location":{"directory":"/f"},"time":{"created":created,"updated":created}});
+        if let Some(p) = parent {
+            s["parentID"] = json!(p);
+        }
+        store
+            .ingest("fixture", &s, &[json!({"id":format!("m_{id}"),"type":"user","time":{"created":created},"text":"x"})], &[])
+            .unwrap();
+    };
+    session("root", None, 1);
+    session("mid", Some("root"), 2);
+    session("leaf", Some("mid"), 3);
+    session("sub_a", Some("mid"), 4);
+    session("orphan", Some("never_indexed"), 5);
+    let get = |id: &str| {
+        query(&store, "history_get_session", json!({"session_id": id}))["items"][0].clone()
+    };
+
+    let leaf = get("leaf");
+    let chain: Vec<_> = leaf["ancestors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["session_id"].clone())
+        .collect();
+    assert_eq!(chain, vec![json!("mid"), json!("root")]);
+    assert_eq!(leaf["children"], json!([]));
+
+    let mid = get("mid");
+    let kids: Vec<_> = mid["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["session_id"].clone())
+        .collect();
+    assert_eq!(kids, vec![json!("leaf"), json!("sub_a")]);
+    assert_eq!(mid["children"][0]["messages"], 1);
+    assert_eq!(mid["children_has_more"], false);
+
+    assert_eq!(get("orphan")["ancestors"][0]["indexed"], false);
+    // Removed upstream: hidden from children, marked in the chain.
+    store
+        .reconcile_inventory(
+            "fixture",
+            &[
+                json!({"id":"mid"}),
+                json!({"id":"leaf"}),
+                json!({"id":"sub_a"}),
+                json!({"id":"orphan"}),
+            ],
+        )
+        .unwrap();
+    assert_eq!(get("mid")["ancestors"][0]["removed_upstream"], true);
+}

@@ -29,10 +29,15 @@ evaluation in [retrieval evaluation](RETRIEVAL-EVALUATION.md).
 - Additional harness adapters, starting with Claude Code and Codex.
 - Global model-request diagnostics; not equivalent to persisted session events.
 - [x] Context-window navigation around a hit (`history_get_context`).
-- Branch-aware session comparison.
+- [x] Branch-aware navigation: `history_get_session` returns ancestors and children.
+- Branch-aware session comparison (diffing sibling branches).
 - [x] Consistent owner-validated index snapshots (`mneme snapshot create|verify|restore`).
 - [x] Full tool-output pagination (`tool_call_id` + `text_offset`/`text_limit`).
-- Literal-search acceleration if measured necessary.
+- Literal-search acceleration if measured necessary. Measured 2026-11 on a synthetic
+  100k-message index (107 MB text, release build): literal search 40–60 ms typical,
+  ~175 ms worst case (no match, full scan); FTS ~25 ms. Not needed at this scale;
+  revisit near ~1M messages, where a full scan approaches the 3 s deadline. A trigram
+  index would roughly triple index size for private transcript data.
 - Independently verified token/cost analytics, summaries and semantic search.
 - General filtered aggregation DSL, top-N ranked relevance and persistent query snapshots.
 - [x] Physical erasure of upstream-removed sessions (`mneme erase --hidden`).
