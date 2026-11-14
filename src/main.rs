@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ragbaz_mneme::{
     api::Api,
-    collect, evac,
+    archive, collect, erase, evac,
     mcp::History,
     store::{Query, Store, default_db},
 };
@@ -49,10 +49,47 @@ enum Command {
         args: String,
     },
     Status,
+    /// Physically remove sessions the upstream source deleted (hidden today).
+    /// Dry-run unless --apply; requires the collector to be stopped.
+    Erase {
+        /// Erase every upstream-removed (hidden) session.
+        #[arg(long, required = true)]
+        hidden: bool,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Consistent owner-produced index export, validation and restore.
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommand,
+    },
     /// Build a private local TF-IDF/LSA snapshot; no network or model download.
     SemanticBuild {
         #[arg(long, default_value_t = 128)]
         dimensions: u32,
+    },
+}
+
+#[derive(Subcommand)]
+enum SnapshotCommand {
+    /// Write a verified, self-contained copy of the index (VACUUM INTO). Never overwrites.
+    Create {
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Check integrity, schema and digest of a snapshot file; read-only.
+    Verify {
+        path: PathBuf,
+        /// Expected lowercase hex SHA-256 of the whole file.
+        #[arg(long)]
+        sha256: Option<String>,
+    },
+    /// Install a verified snapshot as --db. Refuses an existing index.
+    Restore {
+        #[arg(long)]
+        from: PathBuf,
+        #[arg(long)]
+        sha256: Option<String>,
     },
 }
 
@@ -110,6 +147,21 @@ async fn main() -> Result<()> {
             let summary = evac::build(&input, &output, &name, observed_at)?;
             println!("{}", serde_json::to_string(&summary)?);
         }
+        Command::Erase { hidden: _, apply } => {
+            println!("{}", serde_json::to_string(&erase::hidden(&store, apply)?)?);
+        }
+        Command::Snapshot { command } => {
+            let value = match command {
+                SnapshotCommand::Create { out } => archive::create(&store, &out)?,
+                SnapshotCommand::Verify { path, sha256 } => {
+                    archive::verify(&path, sha256.as_deref())?
+                }
+                SnapshotCommand::Restore { from, sha256 } => {
+                    archive::restore(&from, &store, sha256.as_deref())?
+                }
+            };
+            println!("{}", serde_json::to_string(&value)?);
+        }
         Command::Collect {
             url,
             password_file,
@@ -150,6 +202,7 @@ async fn main() -> Result<()> {
                     "history_search",
                     "history_get_session",
                     "history_get_messages",
+                    "history_get_context",
                     "history_get_activity",
                     "history_get_tool_runs",
                     "history_aggregate",

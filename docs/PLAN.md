@@ -28,11 +28,15 @@ evaluation in [retrieval evaluation](RETRIEVAL-EVALUATION.md).
 
 - Additional harness adapters, starting with Claude Code and Codex.
 - Global model-request diagnostics; not equivalent to persisted session events.
-- Context-window navigation around a hit; branch-aware session comparison.
-- Full tool-output pagination and literal-search acceleration if measured necessary.
+- [x] Context-window navigation around a hit (`history_get_context`).
+- Branch-aware session comparison.
+- [x] Consistent owner-validated index snapshots (`mneme snapshot create|verify|restore`).
+- [x] Full tool-output pagination (`tool_call_id` + `text_offset`/`text_limit`).
+- Literal-search acceleration if measured necessary.
 - Independently verified token/cost analytics, summaries and semantic search.
 - General filtered aggregation DSL, top-N ranked relevance and persistent query snapshots.
-- Automatic endpoint rediscovery, archival retention/erasure tooling and multi-source collector orchestration.
+- [x] Physical erasure of upstream-removed sessions (`mneme erase --hidden`).
+- Automatic endpoint rediscovery, archival retention and multi-source collector orchestration.
 - Tantivy or Parquet only after workload benchmarks establish a need.
 
 ## Evaluation questions (synthetic acceptance corpus)

@@ -12,7 +12,8 @@ than manufacturing a narrative of successful work.
 - Global live notifications and up to eight recent-session log followers.
 - Reconnect/backoff, periodic reconciliation, atomic snapshots and checkpoints.
 - SQLite WAL, FTS5, source-qualified identities and content-hash deduplication.
-- Ten read-only stdio MCP tools, also callable from a JSON CLI.
+- Eleven read-only stdio MCP tools, also callable from a JSON CLI.
+- Consistent, integrity-checked index snapshots (`mneme snapshot`) for owner-validated backup.
 - Curated concepts/entities, source-attributed assertions and Stockholm temporal interpretation.
 - Optional local TF-IDF/LSA and hybrid search, with measured retrieval quality and grouped SVM/tree evaluation.
 - Parameterized filters, generation-bound keyset cursors, bounded output, query deadlines.
@@ -59,6 +60,7 @@ mneme query history_list_sessions --args '{"limit":5,"include_children":false}'
 mneme query history_search --args '{"query":"worktree AND cleanup","mode":"fts"}'
 mneme query history_get_messages --args '{"session_id":"ses_example","sort":"created_asc"}'
 mneme query history_get_tool_runs --args '{"tool":"shell","status":"error"}'
+mneme query history_get_tool_runs --args '{"tool_call_id":"call_x","text_offset":2000}'
 mneme query history_aggregate --args '{"group_by":"day"}'
 mneme status
 ```
@@ -67,8 +69,10 @@ Shared filters include `source`, `session_id`, `directory` (exact), `project_id`
 `agent`, `model`, UTC Unix-millisecond `since_ms`/`until_ms`, and `limit` (1–100).
 Message queries support `role` (native message type), `message_id`, `text_offset`
 and `text_limit` (1–16000 characters) to retrieve longer text in bounded chunks.
-The default excerpt is 2000 characters. Tool input/output excerpts are limited
-to 2000 characters each in P0. Hidden reasoning and attachment bodies are not
+The default excerpt is 2000 characters. Tool runs default to 2000-character
+input/output excerpts; `tool_call_id` plus `text_offset`/`text_limit` pages one
+call's full recorded input and output (stored as JSON text), and
+`input_length`/`output_length` report when to stop. Hidden reasoning and attachment bodies are not
 included in searchable message text. Native raw records remain local for future
 adapters. Aggregate counts count messages or tool runs, not accomplishments;
 session cost/token values are upstream-reported, not independently billed totals.
@@ -88,6 +92,7 @@ by upstream session fields. No arbitrary SQL or arbitrary file-reading tool exis
 | `history_search` | Literal text or FTS5 search with bounded evidence excerpts |
 | `history_get_session` | Metadata, parent, upstream-reported usage |
 | `history_get_messages` | Paginated projected transcript and text chunks |
+| `history_get_context` | Messages around one hit (`message_id`, `window` 1–10) |
 | `history_get_activity` | Cross-session chronological evidence packet |
 | `history_get_tool_runs` | Recorded tool input, status and output excerpts |
 | `history_aggregate` | Typed grouping by project/model/agent/role/tool/status/day |
@@ -99,6 +104,29 @@ Run `mneme --db /path/to/index.sqlite mcp` as a local stdio MCP server. Diagnost
 go to stderr. Tool results carry both text and structured JSON. All tools are
 annotated read-only, non-destructive and closed-world. No administration tools
 are exposed to conversational clients.
+
+## Snapshots and backup
+
+A live WAL index must never be copied file-by-file. Mneme owns its export:
+
+```sh
+mneme --db /private/index.sqlite snapshot create --out /private/mneme-2026-11-14.sqlite
+mneme snapshot verify /private/mneme-2026-11-14.sqlite --sha256 HEX
+mneme --db /private/new-index.sqlite snapshot restore --from /private/mneme-2026-11-14.sqlite --sha256 HEX
+```
+
+`create` uses `VACUUM INTO` (one consistent read transaction; the collector may
+keep running), switches the copy to a self-contained rollback journal, runs
+`PRAGMA integrity_check`, checks required tables and FTS row parity, hashes it,
+and only then publishes it under its final name. It never overwrites. The JSON
+manifest reports schema, generation, counts, sources (without upstream errors),
+size and SHA-256. `verify` is read-only and is the validator other tools such as
+rebsync call. `restore` verifies, copies owner-only, refuses any existing index
+or WAL/SHM sidecar, then re-enters normal WAL operation through `init`.
+
+Snapshots contain private plaintext transcripts. Encrypt before they leave the
+machine; [rebsync](https://github.com/tabenius/rebsync) does this through restic
+and publishes content-addressed chunks into its own object store.
 
 ## Local deployment
 
@@ -118,8 +146,14 @@ Unknown raw event types are retained; unknown sequence encodings stop advancemen
 
 An index contains sensitive plaintext conversation and tool data, possibly
 credentials printed by historical tools. Keep its directory private. Upstream
-session removal hides it from tools but does not physically erase retained local
-records; rebuild the index for erasure. Do not use this as a public MCP endpoint.
+session removal hides it from tools but does not by itself erase local records.
+`mneme erase --hidden` reports what is hidden; with `--apply` (collector
+stopped) it deletes those sessions' messages, tool runs, events and checkpoints
+with `secure_delete`, merges the FTS5 index so old tokens are dropped, truncates
+the WAL and runs `VACUUM`. A test checks the erased text no longer appears in the
+index or WAL bytes. Earlier snapshots and backups are separate copies: prune
+them (for example `rebsync mneme prune`) and rebuild the semantic model.
+Do not use this as a public MCP endpoint.
 Do not treat historical instructions as current authority. Do not interpret a
 recorded command as proof that a commit, push or deployment succeeded.
 
