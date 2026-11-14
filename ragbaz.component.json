@@ -1,0 +1,14 @@
+{
+  "$schema": "https://ragbaz.cc/schemas/ragbaz.component.schema.json",
+  "schemaVersion": "0.2.0",
+  "identity": {
+    "id": "ragbaz.mneme",
+    "name": "Mneme",
+    "repository": "tabenius/mneme",
+    "owner": "ragbaz",
+    "lifecycle": "prototype"
+  },
+  "docs": {
+    "readme": "README.md"
+  }
+}
