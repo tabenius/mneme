@@ -90,7 +90,7 @@ by upstream session fields. No arbitrary SQL or arbitrary file-reading tool exis
 |---|---|
 | `history_list_sessions` | Recent sessions with explicit source and filters |
 | `history_search` | Literal text or FTS5 search with bounded evidence excerpts |
-| `history_get_session` | Metadata, parent, upstream-reported usage |
+| `history_get_session` | Metadata, upstream-reported usage, parent chain and child (sub-agent) sessions |
 | `history_get_messages` | Paginated projected transcript and text chunks |
 | `history_get_context` | Messages around one hit (`message_id`, `window` 1–10) |
 | `history_get_activity` | Cross-session chronological evidence packet |
