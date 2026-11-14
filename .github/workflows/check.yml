@@ -26,6 +26,9 @@ jobs:
           python-version: '3.12'
       - run: pip install -r evaluation/requirements.txt
       - run: python -m unittest discover -s tests -p 'test_*.py'
+      - run: cargo build --locked
+      - name: Synthetic retrieval regression gate
+        run: python scripts/check-retrieval.py --binary target/debug/mneme
   packages:
     if: github.event_name != 'pull_request'
     needs: rust
