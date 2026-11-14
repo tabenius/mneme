@@ -57,6 +57,9 @@ enum Command {
         hidden: bool,
         #[arg(long)]
         apply: bool,
+        /// Keep the semantic model even though it derives from erased text.
+        #[arg(long)]
+        keep_semantic: bool,
     },
     /// Consistent owner-produced index export, validation and restore.
     Snapshot {
@@ -147,8 +150,15 @@ async fn main() -> Result<()> {
             let summary = evac::build(&input, &output, &name, observed_at)?;
             println!("{}", serde_json::to_string(&summary)?);
         }
-        Command::Erase { hidden: _, apply } => {
-            println!("{}", serde_json::to_string(&erase::hidden(&store, apply)?)?);
+        Command::Erase {
+            hidden: _,
+            apply,
+            keep_semantic,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&erase::hidden(&store, apply, keep_semantic)?)?
+            );
         }
         Command::Snapshot { command } => {
             let value = match command {

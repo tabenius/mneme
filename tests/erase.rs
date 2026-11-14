@@ -48,7 +48,7 @@ fn erasure_removes_hidden_text_from_every_index_file() {
         contains(&store.path, SECRET) || contains(&wal, SECRET),
         "fixture should start with the hidden text on disk"
     );
-    let dry = erase::hidden(&store, false).unwrap();
+    let dry = erase::hidden(&store, false, false).unwrap();
     assert_eq!(dry["dry_run"], true);
     assert_eq!(dry["hidden"]["sessions"], 1);
     assert_eq!(dry["hidden"]["messages"], 2);
@@ -59,7 +59,7 @@ fn erasure_removes_hidden_text_from_every_index_file() {
     let before = store
         .query("history_index_status", &Query::default())
         .unwrap();
-    let applied = erase::hidden(&store, true).unwrap();
+    let applied = erase::hidden(&store, true, false).unwrap();
     assert_eq!(applied["erased"]["sessions"], 1);
     assert_eq!(applied["hidden"]["sessions"], 0);
     assert_eq!(applied["wal_checkpoint_busy"], false);
@@ -85,7 +85,7 @@ fn erasure_removes_hidden_text_from_every_index_file() {
     assert_eq!(after["counts"]["raw_events"], 1);
     // Idempotent.
     assert_eq!(
-        erase::hidden(&store, true).unwrap()["hidden"]["sessions"],
+        erase::hidden(&store, true, false).unwrap()["hidden"]["sessions"],
         0
     );
 }
@@ -95,10 +95,68 @@ fn erasure_refuses_while_a_collector_holds_the_lock() {
     let dir = tempfile::tempdir().unwrap();
     let store = fixture(dir.path());
     let _collector = collect::lock(&store).unwrap();
-    assert!(erase::hidden(&store, true).is_err());
+    assert!(erase::hidden(&store, true, false).is_err());
     // Dry-run never needs the lock and changes nothing.
     assert_eq!(
-        erase::hidden(&store, false).unwrap()["hidden"]["sessions"],
+        erase::hidden(&store, false, false).unwrap()["hidden"]["sessions"],
         1
     );
+}
+
+fn semantic_model(dir: &std::path::Path) {
+    let folder = dir.join("semantic");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("lsa-1.npz"), format!("vectors {SECRET}")).unwrap();
+    std::fs::write(folder.join("unrelated.txt"), "not ours").unwrap();
+    let manifest = json!({"method": "lsa", "vocabulary": {SECRET: 0, "worktree": 1},
+        "keys": ["k1"], "managed_arrays": ["lsa-1.npz", "../escape"]});
+    std::fs::write(folder.join("manifest.json"), manifest.to_string()).unwrap();
+}
+
+#[test]
+fn erasure_discards_the_semantic_model_derived_from_erased_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(dir.path());
+    semantic_model(dir.path());
+    let dry = erase::hidden(&store, false, false).unwrap();
+    assert!(
+        dry["semantic_model"]
+            .as_str()
+            .unwrap()
+            .contains("will be discarded")
+    );
+    assert!(dir.path().join("semantic/manifest.json").exists());
+    let applied = erase::hidden(&store, true, false).unwrap();
+    assert_eq!(
+        applied["semantic_model"]["discarded"],
+        json!(["lsa-1.npz", "manifest.json"])
+    );
+    let folder = dir.path().join("semantic");
+    assert!(!folder.join("manifest.json").exists() && !folder.join("lsa-1.npz").exists());
+    // Only files the model declared are removed; traversal names are ignored.
+    assert!(folder.join("unrelated.txt").exists());
+    for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+        assert!(
+            !contains(&entry.path(), SECRET),
+            "{:?} holds erased text",
+            entry.path()
+        );
+    }
+    // Status keeps working without a model.
+    assert!(
+        store
+            .query("history_index_status", &Query::default())
+            .unwrap()["semantic_model"]
+            .is_null()
+    );
+}
+
+#[test]
+fn keep_semantic_is_explicit_and_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(dir.path());
+    semantic_model(dir.path());
+    let applied = erase::hidden(&store, true, true).unwrap();
+    assert!(applied["semantic_model"].as_str().unwrap().contains("kept"));
+    assert!(dir.path().join("semantic/manifest.json").exists());
 }
