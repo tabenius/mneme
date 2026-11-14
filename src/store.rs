@@ -311,7 +311,7 @@ impl Store {
         }
         Ok(())
     }
-    fn writer(&self) -> Result<Connection> {
+    pub(crate) fn writer(&self) -> Result<Connection> {
         // Only init() may create an index. A disappeared index must not be
         // silently replaced by an empty database during a health/checkpoint write.
         let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;

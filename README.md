@@ -146,8 +146,14 @@ Unknown raw event types are retained; unknown sequence encodings stop advancemen
 
 An index contains sensitive plaintext conversation and tool data, possibly
 credentials printed by historical tools. Keep its directory private. Upstream
-session removal hides it from tools but does not physically erase retained local
-records; rebuild the index for erasure. Do not use this as a public MCP endpoint.
+session removal hides it from tools but does not by itself erase local records.
+`mneme erase --hidden` reports what is hidden; with `--apply` (collector
+stopped) it deletes those sessions' messages, tool runs, events and checkpoints
+with `secure_delete`, merges the FTS5 index so old tokens are dropped, truncates
+the WAL and runs `VACUUM`. A test checks the erased text no longer appears in the
+index or WAL bytes. Earlier snapshots and backups are separate copies: prune
+them (for example `rebsync mneme prune`) and rebuild the semantic model.
+Do not use this as a public MCP endpoint.
 Do not treat historical instructions as current authority. Do not interpret a
 recorded command as proof that a commit, push or deployment succeeded.
 

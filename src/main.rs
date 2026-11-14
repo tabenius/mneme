@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ragbaz_mneme::{
     api::Api,
-    archive, collect, evac,
+    archive, collect, erase, evac,
     mcp::History,
     store::{Query, Store, default_db},
 };
@@ -49,6 +49,15 @@ enum Command {
         args: String,
     },
     Status,
+    /// Physically remove sessions the upstream source deleted (hidden today).
+    /// Dry-run unless --apply; requires the collector to be stopped.
+    Erase {
+        /// Erase every upstream-removed (hidden) session.
+        #[arg(long, required = true)]
+        hidden: bool,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Consistent owner-produced index export, validation and restore.
     Snapshot {
         #[command(subcommand)]
@@ -137,6 +146,9 @@ async fn main() -> Result<()> {
         } => {
             let summary = evac::build(&input, &output, &name, observed_at)?;
             println!("{}", serde_json::to_string(&summary)?);
+        }
+        Command::Erase { hidden: _, apply } => {
+            println!("{}", serde_json::to_string(&erase::hidden(&store, apply)?)?);
         }
         Command::Snapshot { command } => {
             let value = match command {

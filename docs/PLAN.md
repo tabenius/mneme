@@ -35,7 +35,8 @@ evaluation in [retrieval evaluation](RETRIEVAL-EVALUATION.md).
 - Literal-search acceleration if measured necessary.
 - Independently verified token/cost analytics, summaries and semantic search.
 - General filtered aggregation DSL, top-N ranked relevance and persistent query snapshots.
-- Automatic endpoint rediscovery, archival retention/erasure tooling and multi-source collector orchestration.
+- [x] Physical erasure of upstream-removed sessions (`mneme erase --hidden`).
+- Automatic endpoint rediscovery, archival retention and multi-source collector orchestration.
 - Tantivy or Parquet only after workload benchmarks establish a need.
 
 ## Evaluation questions (synthetic acceptance corpus)
