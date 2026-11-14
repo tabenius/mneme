@@ -39,6 +39,8 @@ pub struct Query {
     pub model: Option<String>,
     pub agent: Option<String>,
     pub tool: Option<String>,
+    /// Restrict tool runs to one call; combine with text_offset to page long input/output.
+    pub tool_call_id: Option<String>,
     pub status: Option<String>,
     /// Literal text, an FTS5 expression in fts mode, or natural-language ranked query.
     pub query: Option<String>,
@@ -606,6 +608,14 @@ impl Store {
                 "tool/status filters require history_get_tool_runs or a tool/status aggregate"
             );
         }
+        if let Some(call) = &q.tool_call_id {
+            anyhow::ensure!(
+                tool == "history_get_tool_runs",
+                "tool_call_id requires history_get_tool_runs"
+            );
+            conditions.push("t.id=?".into());
+            values.push(call.clone().into());
+        }
         if let Some(name) = &q.tool {
             conditions.push("t.name=?".into());
             values.push(name.clone().into());
@@ -704,7 +714,17 @@ impl Store {
         let selection = if sessions {
             "json_object('source',s.source,'harness','opencode','session_id',s.id,'title',s.title,'directory',s.directory,'project_id',s.project,'parent_id',s.parent,'created_ms',s.created,'updated_ms',s.updated,'indexed_ms',s.indexed,'agent',s.agent,'model',s.model,'reported_cost_usd',s.cost,'reported_tokens_input',s.tokens_input,'reported_tokens_output',s.tokens_output,'messages',(SELECT count(*) FROM messages WHERE session_key=s.key))".to_owned()
         } else if tools {
-            "json_object('source',s.source,'harness','opencode','session_id',s.id,'message_id',m.id,'tool_call_id',t.id,'tool',t.name,'status',t.status,'created_ms',t.created,'input',substr(t.input,1,2000),'output',substr(t.output,1,2000),'truncated',length(coalesce(t.input,''))>2000 OR length(coalesce(t.output,''))>2000)".to_owned()
+            {
+                // The same character window applies to input and output, so one
+                // offset walks both; lengths tell the caller when to stop.
+                let start = u64::from(q.text_offset.unwrap_or(0)) + 1;
+                let size = q.text_limit.unwrap_or(2000);
+                let end = start - 1 + u64::from(size);
+                format!(
+                    "json_object('source',s.source,'harness','opencode','session_id',s.id,'message_id',m.id,'tool_call_id',t.id,'tool',t.name,'status',t.status,'created_ms',t.created,'input',substr(t.input,{start},{size}),'output',substr(t.output,{start},{size}),'text_offset',{},'input_length',length(coalesce(t.input,'')),'output_length',length(coalesce(t.output,'')),'truncated',length(coalesce(t.input,''))>{end} OR length(coalesce(t.output,''))>{end})",
+                    start - 1
+                )
+            }
         } else {
             let offset = q.text_offset.unwrap_or(0);
             let size = q.text_limit.unwrap_or(2000);
@@ -773,6 +793,7 @@ fn context(c: &Connection, q: &Query, generation: i64, freshness: Value) -> Resu
             && q.query.is_none()
             && q.role.is_none()
             && q.tool.is_none()
+            && q.tool_call_id.is_none()
             && q.status.is_none()
             && q.group_by.is_none()
             && q.limit.is_none()

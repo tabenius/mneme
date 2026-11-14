@@ -374,3 +374,68 @@ fn degraded_collector_marks_index_unhealthy() {
     assert_eq!(v["index"]["upstream_errors"], json!(["upstream refused"]));
     assert!(v["remedy"].as_str().unwrap().contains("upstream error"));
 }
+
+#[test]
+fn long_tool_output_pages_back_exactly() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    store.init().unwrap();
+    store.source("fixture", "2.test").unwrap();
+    let long: String = (0..5000)
+        .map(|i| char::from(b'a' + (i % 26) as u8))
+        .collect();
+    let session = json!({"id":"ses_t","projectID":"p","title":"Tools","location":{"directory":"/fixture"},"time":{"created":1,"updated":2}});
+    let messages = vec![
+        json!({"id":"reply","type":"assistant","time":{"created":1},"content":[
+            {"type":"tool","id":"call_long","name":"shell","state":{"status":"completed","input":{"command":"cat big"},"output":long},"time":{"created":2}},
+            {"type":"tool","id":"call_short","name":"shell","state":{"status":"completed","input":{"command":"true"},"output":"ok"},"time":{"created":3}}
+        ]}),
+    ];
+    store.ingest("fixture", &session, &messages, &[]).unwrap();
+    // Output is stored as JSON text, so the reassembled pages decode to the original.
+    let mut text = String::new();
+    let mut offset: u64 = 0;
+    loop {
+        let page = query(
+            &store,
+            "history_get_tool_runs",
+            json!({"tool_call_id":"call_long","text_offset":offset,"text_limit":1500}),
+        );
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["text_offset"], offset);
+        text.push_str(items[0]["output"].as_str().unwrap());
+        let total = items[0]["output_length"].as_u64().unwrap();
+        offset += 1500;
+        if !items[0]["truncated"].as_bool().unwrap() {
+            assert!(offset >= total);
+            break;
+        }
+    }
+    assert_eq!(serde_json::from_str::<String>(&text).unwrap(), long);
+    // Defaults are unchanged: 2000-character excerpts from the start.
+    let first = query(
+        &store,
+        "history_get_tool_runs",
+        json!({"tool_call_id":"call_long"}),
+    );
+    assert_eq!(
+        first["items"][0]["output"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count(),
+        2000
+    );
+    assert_eq!(first["items"][0]["truncated"], true);
+    let short = query(
+        &store,
+        "history_get_tool_runs",
+        json!({"tool_call_id":"call_short"}),
+    );
+    assert_eq!(short["items"][0]["truncated"], false);
+    let bad =
+        serde_json::from_value::<Query>(json!({"session_id":"ses_t","tool_call_id":"call_long"}))
+            .unwrap();
+    assert!(store.query("history_get_messages", &bad).is_err());
+}

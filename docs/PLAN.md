@@ -31,7 +31,8 @@ evaluation in [retrieval evaluation](RETRIEVAL-EVALUATION.md).
 - [x] Context-window navigation around a hit (`history_get_context`).
 - Branch-aware session comparison.
 - [x] Consistent owner-validated index snapshots (`mneme snapshot create|verify|restore`).
-- Full tool-output pagination and literal-search acceleration if measured necessary.
+- [x] Full tool-output pagination (`tool_call_id` + `text_offset`/`text_limit`).
+- Literal-search acceleration if measured necessary.
 - Independently verified token/cost analytics, summaries and semantic search.
 - General filtered aggregation DSL, top-N ranked relevance and persistent query snapshots.
 - Automatic endpoint rediscovery, archival retention/erasure tooling and multi-source collector orchestration.

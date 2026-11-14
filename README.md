@@ -60,6 +60,7 @@ mneme query history_list_sessions --args '{"limit":5,"include_children":false}'
 mneme query history_search --args '{"query":"worktree AND cleanup","mode":"fts"}'
 mneme query history_get_messages --args '{"session_id":"ses_example","sort":"created_asc"}'
 mneme query history_get_tool_runs --args '{"tool":"shell","status":"error"}'
+mneme query history_get_tool_runs --args '{"tool_call_id":"call_x","text_offset":2000}'
 mneme query history_aggregate --args '{"group_by":"day"}'
 mneme status
 ```
@@ -68,8 +69,10 @@ Shared filters include `source`, `session_id`, `directory` (exact), `project_id`
 `agent`, `model`, UTC Unix-millisecond `since_ms`/`until_ms`, and `limit` (1–100).
 Message queries support `role` (native message type), `message_id`, `text_offset`
 and `text_limit` (1–16000 characters) to retrieve longer text in bounded chunks.
-The default excerpt is 2000 characters. Tool input/output excerpts are limited
-to 2000 characters each in P0. Hidden reasoning and attachment bodies are not
+The default excerpt is 2000 characters. Tool runs default to 2000-character
+input/output excerpts; `tool_call_id` plus `text_offset`/`text_limit` pages one
+call's full recorded input and output (stored as JSON text), and
+`input_length`/`output_length` report when to stop. Hidden reasoning and attachment bodies are not
 included in searchable message text. Native raw records remain local for future
 adapters. Aggregate counts count messages or tool runs, not accomplishments;
 session cost/token values are upstream-reported, not independently billed totals.

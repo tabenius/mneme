@@ -235,7 +235,7 @@ impl History {
     }
 
     #[tool(
-        description = "Find indexed tool executions, status, bounded input/output and source message references. Recorded tool status is not proof of external deployment or effects.",
+        description = "Find indexed tool executions, status, bounded input/output and source message references. Page one call's full input/output with tool_call_id + text_offset/text_limit. Recorded tool status is not proof of external deployment or effects.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
