@@ -151,8 +151,11 @@ session removal hides it from tools but does not by itself erase local records.
 stopped) it deletes those sessions' messages, tool runs, events and checkpoints
 with `secure_delete`, merges the FTS5 index so old tokens are dropped, truncates
 the WAL and runs `VACUUM`. A test checks the erased text no longer appears in the
-index or WAL bytes. Earlier snapshots and backups are separate copies: prune
-them (for example `rebsync mneme prune`) and rebuild the semantic model.
+index or WAL bytes. The local semantic model is derived from that text (its
+manifest holds the vocabulary and message keys), so erase also discards the files
+it declares, under the builder's lock; rebuild it with `mneme semantic-build`, or
+pass `--keep-semantic` to keep it knowingly. Earlier snapshots and backups are
+separate copies: prune them, for example with `rebsync mneme prune --apply`.
 Do not use this as a public MCP endpoint.
 Do not treat historical instructions as current authority. Do not interpret a
 recorded command as proof that a commit, push or deployment succeeded.
