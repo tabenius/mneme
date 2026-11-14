@@ -161,10 +161,15 @@ cargo clippy --all-targets -- -D warnings
 cargo test --locked
 python3 scripts/smoke-mcp.py --binary target/debug/mneme --db /private/index.sqlite
 python3 -m unittest discover -s tests -p 'test_*.py'
+cargo build --locked
+python3 scripts/check-retrieval.py --binary target/debug/mneme
 ```
 
 Tests use synthetic conversations. Live smoke tests print counts and timings,
-not transcript contents. See [P0 acceptance plan](docs/PLAN.md).
+not transcript contents. `check-retrieval.py` runs every search mode against a
+deterministic synthetic corpus with constructed judgments and gates regressions;
+it is a smoke benchmark, not a quality claim about real conversations. See
+[P0 acceptance plan](docs/PLAN.md).
 
 ## Hypomnema evacuation (experimental)
 Mneme can produce minimal viable handoffs (MVH) for active projects to feed the hypomnema evacuation bundle sink in `ragbaz-dash`. See `docs/HYPOMNEMA.md` for the bundle format and `mneme evac` usage.

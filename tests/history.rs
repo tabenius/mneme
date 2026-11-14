@@ -302,3 +302,75 @@ fn only_one_collector_can_own_an_index() {
     drop(first);
     assert!(ragbaz_mneme::collect::lock(&s).is_ok());
 }
+
+#[test]
+fn status_is_structured_when_the_index_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("missing/index.sqlite"));
+    let v = query(&store, "history_index_status", json!({}));
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["healthy"], false);
+    assert_eq!(v["state"], "missing");
+    assert_eq!(v["index"]["exists"], false);
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("Cannot read index at")
+    );
+    assert!(v["remedy"].as_str().unwrap().contains("mneme-collector"));
+    // Only status degrades; other tools must fail rather than invent data.
+    assert!(
+        store
+            .query("history_list_sessions", &Query::default())
+            .is_err()
+    );
+}
+
+#[test]
+fn status_distinguishes_empty_ready_and_stale_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    store.init().unwrap();
+    let empty = query(&store, "history_index_status", json!({}));
+    assert_eq!(empty["ok"], false);
+    assert_eq!(empty["state"], "empty");
+    assert!(empty["remedy"].as_str().unwrap().contains("enable --now"));
+
+    let (_d, s) = fixture();
+    let ready = query(&s, "history_index_status", json!({}));
+    assert_eq!(ready["ok"], true);
+    assert_eq!(ready["healthy"], true);
+    assert_eq!(ready["state"], "ready");
+    assert_eq!(ready["index"]["schema_version"], 2);
+    assert_eq!(ready["index"]["stale"], false);
+    assert_eq!(ready["counts"]["sessions"], 6);
+    assert!(ready["remedy"].is_null());
+    assert!(ready["index"]["size_bytes"].as_u64().unwrap() > 0);
+
+    let connection = rusqlite::Connection::open(&s.path).unwrap();
+    connection
+        .execute("UPDATE sources SET reconciled=1", [])
+        .unwrap();
+    let stale = query(&s, "history_index_status", json!({}));
+    assert_eq!(stale["ok"], true);
+    assert_eq!(stale["healthy"], false);
+    assert_eq!(stale["index"]["stale"], true);
+    assert!(
+        stale["remedy"]
+            .as_str()
+            .unwrap()
+            .contains("mneme-collector")
+    );
+}
+
+#[test]
+fn degraded_collector_marks_index_unhealthy() {
+    let (_d, s) = fixture();
+    s.health("fixture", Some("upstream refused")).unwrap();
+    let v = query(&s, "history_index_status", json!({}));
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["healthy"], false);
+    assert_eq!(v["index"]["upstream_errors"], json!(["upstream refused"]));
+    assert!(v["remedy"].as_str().unwrap().contains("upstream error"));
+}

@@ -155,6 +155,25 @@ Check `mneme status` for source errors, reconciliation age and `stale` before
 relying on query coverage. A successful MCP handshake alone does not establish
 that collection is running or current.
 
+### Status and error contract
+
+`mneme status` and `history_index_status` always answer with metadata, even when
+no index exists; they never start collection. Branch on these fields instead of
+parsing prose:
+
+- `ok`: the index is readable and contains at least one session.
+- `healthy`: `ok` and no source is stale or degraded.
+- `state`: `ready`, `empty`, `missing` or `unreadable`.
+- `index.stale`: no reconciliation within `stale_after_ms` (60 seconds).
+- `index.upstream_errors`: collector-reported upstream failures.
+- `remedy`: the operator action, or `null` when healthy.
+
+Every MCP tool error also carries a stable `code` (`index_missing`,
+`index_unreadable`, `index_empty`, `cursor_expired`, `invalid_request`,
+`query_timeout`, `overloaded`, `query_failed`), a `hint`, `retryable`, and the
+same metadata-only `index` diagnosis. Diagnoses never include transcript text and
+are safe to log.
+
 ## Optional semantic layer (0.2)
 
 Install numerical requirements in a suitable local Python environment and set

@@ -9,6 +9,10 @@ use std::{
     time::Duration,
 };
 
+/// A collector that has not reconciled within this window is reported stale.
+/// It is deliberately conservative: four missed default 15-second cycles.
+pub const STALE_AFTER_MS: i64 = 60_000;
+
 #[derive(Clone)]
 pub struct Store {
     pub path: PathBuf,
@@ -123,6 +127,150 @@ impl Store {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
+    /// Metadata-only health for this index. Never returns transcript text, so it
+    /// is safe to include in error payloads, logs and agent-visible diagnostics.
+    pub fn diagnose(&self) -> Value {
+        if !self.path.is_file() {
+            let mut value = json!({
+                "ok": false,
+                "healthy": false,
+                "state": "missing",
+                "index": {
+                    "path": self.path.display().to_string(),
+                    "exists": false,
+                    "size_bytes": Value::Null,
+                    "wal_bytes": Value::Null,
+                    "schema_version": Value::Null,
+                    "stale": true,
+                    "stale_after_ms": STALE_AFTER_MS,
+                },
+                "counts": Value::Null,
+                "hint": "Mneme has a read-only MCP surface and never starts collection by itself.",
+                "remedy": "Collect at least once: systemctl --user enable --now mneme-collector (or run `mneme collect --follow`), then retry.",
+            });
+            value["error"] = json!("Index file is absent");
+            return value;
+        }
+        let (c, coverage) = match self.reader() {
+            Ok(c) => match status(&c) {
+                Ok(coverage) => (c, coverage),
+                Err(error) => return self.unreadable(&error.to_string()),
+            },
+            Err(error) => return self.unreadable(&error.to_string()),
+        };
+        let mut health = self.index_health(&coverage, schema_version(&c).unwrap_or(0));
+        health["counts"] = coverage.get("counts").cloned().unwrap_or(Value::Null);
+        health
+    }
+    fn unreadable(&self, message: &str) -> Value {
+        json!({
+            "ok": false,
+            "healthy": false,
+            "state": "unreadable",
+            "index": {
+                "path": self.path.display().to_string(),
+                "exists": self.path.is_file(),
+                "size_bytes": file_len(&self.path),
+                "wal_bytes": file_len(&wal_path(&self.path)),
+                "schema_version": Value::Null,
+                "stale": Value::Null,
+                "stale_after_ms": STALE_AFTER_MS,
+            },
+            "counts": Value::Null,
+            "error": message,
+            "remedy": "The index exists but is not readable. Check file permissions, free disk space and `systemctl --user status mneme-collector`.",
+        })
+    }
+    /// Status must never fail: a broken index is a state, not an exception.
+    fn index_status(&self) -> Result<Value> {
+        match self.index_status_inner() {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let mut payload = self.diagnose();
+                payload["error"] = json!(error.to_string());
+                Ok(payload)
+            }
+        }
+    }
+    fn index_status_inner(&self) -> Result<Value> {
+        let c = self.reader()?;
+        let freshness = status(&c)?;
+        let health = self.index_health(&freshness, schema_version(&c)?);
+        let mut value = freshness;
+        if let (Some(out), Some(health)) = (value.as_object_mut(), health.as_object()) {
+            out.extend(health.clone());
+        }
+        value["semantic_model"] = semantic_manifest(&self.path);
+        Ok(value)
+    }
+    /// Index health derived from an already-open read snapshot. Keeps the
+    /// freshness payload consistent with `diagnose()` without a second open.
+    fn index_health(&self, coverage: &Value, schema_version: i64) -> Value {
+        let sources = coverage
+            .get("sources")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let sessions = coverage
+            .pointer("/counts/sessions")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let array = sources.as_array();
+        let last_collected_ms = array.and_then(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| source["last_reconciled_ms"].as_i64())
+                .max()
+        });
+        let age_ms = last_collected_ms.map(|time| crate::now_ms().saturating_sub(time));
+        let stale = array.is_none_or(|sources| {
+            sources.is_empty()
+                || sources
+                    .iter()
+                    .any(|source| source["stale"].as_bool().unwrap_or(true))
+        });
+        let upstream_errors = array
+            .map(|sources| {
+                sources
+                    .iter()
+                    .filter_map(|source| source["error"].as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let degraded = array.is_some_and(|sources| {
+            sources
+                .iter()
+                .any(|source| source["connection"] == "degraded")
+        });
+        let ok = sessions > 0;
+        let healthy = ok && !stale && !degraded;
+        let remedy = if !ok {
+            "Index is readable but empty. Start the collector: systemctl --user enable --now mneme-collector."
+        } else if degraded {
+            "The collector reported an upstream error; see sources[].error and `systemctl --user status mneme-collector`."
+        } else if stale {
+            "No recent collector reconciliation; check `systemctl --user status mneme-collector`."
+        } else {
+            ""
+        };
+        json!({
+            "ok": ok,
+            "healthy": healthy,
+            "state": if ok { "ready" } else { "empty" },
+            "index": {
+                "path": self.path.display().to_string(),
+                "exists": true,
+                "size_bytes": file_len(&self.path),
+                "wal_bytes": file_len(&wal_path(&self.path)),
+                "schema_version": schema_version,
+                "stale": stale,
+                "stale_after_ms": STALE_AFTER_MS,
+                "last_collected_ms": last_collected_ms,
+                "age_ms": age_ms,
+                "upstream_errors": upstream_errors,
+            },
+            "remedy": if remedy.is_empty() { Value::Null } else { json!(remedy) },
+        })
+    }
     pub fn init(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             let mut builder = std::fs::DirBuilder::new();
@@ -171,7 +319,12 @@ impl Store {
     }
     fn reader(&self) -> Result<Connection> {
         let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .context("Cannot read index; run mneme collect and check collector health")?;
+            .with_context(|| {
+                format!(
+                    "Cannot read index at {}; run mneme collect and check collector health",
+                    self.path.display()
+                )
+            })?;
         c.busy_timeout(Duration::from_secs(3))?;
         c.execute_batch("PRAGMA query_only=ON; BEGIN;")?;
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
@@ -358,6 +511,12 @@ impl Store {
             q.time_frame.is_none() && q.entity.is_none() && q.predicate.is_none(),
             "time_frame/entity/predicate require semantic search or knowledge tools"
         );
+        // Status is the discovery tool: it must answer even when there is no
+        // usable index yet, otherwise an agent cannot tell "broken" from
+        // "not collected".
+        if tool == "history_index_status" {
+            return self.index_status();
+        }
         let c = self.reader()?;
         let generation: i64 =
             c.query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
@@ -371,26 +530,6 @@ impl Store {
             q.window.is_none(),
             "window applies only to history_get_context"
         );
-        if tool == "history_index_status" {
-            let mut freshness = freshness;
-            let manifest = self
-                .path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("semantic/manifest.json");
-            freshness["semantic_model"] = match std::fs::read(manifest) {
-                Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-                    Ok(v) => {
-                        json!({"method":v["method"],"documents":v["documents"],"dimensions":v["dimensions"],"built_at_ms":v["built_at_ms"],"corpus_hash":v["corpus_hash"],"coverage":"Local LSA snapshot; changed/deleted candidates are excluded at query time. Not a pretrained neural encoder."})
-                    }
-                    Err(_) => {
-                        json!({"error":"Semantic manifest is unreadable; rebuild the local model"})
-                    }
-                },
-                Err(_) => Value::Null,
-            };
-            return Ok(freshness);
-        }
         let mut signature = q.clone();
         signature.cursor = None;
         signature.limit = None;
@@ -736,9 +875,54 @@ fn status(c: &Connection) -> Result<Value> {
         source["stale"] = json!(age.is_none_or(|age| age > 60_000));
     }
     let counts:Value=serde_json::from_str(&c.query_row("SELECT json_object('sessions',(SELECT count(*) FROM sessions WHERE deleted=0),'messages',(SELECT count(*) FROM messages m JOIN sessions s ON s.key=m.session_key WHERE s.deleted=0),'tool_runs',(SELECT count(*) FROM tool_runs t JOIN sessions s ON s.key=t.session_key WHERE s.deleted=0),'raw_events',(SELECT count(*) FROM events),'checkpoints',(SELECT count(*) FROM checkpoints))",[],|r|r.get::<_,String>(0))?)?;
+    let stale = sources.is_empty()
+        || sources
+            .iter()
+            .any(|source| source["stale"].as_bool().unwrap_or(true));
+    let max_source_age_ms = sources
+        .iter()
+        .filter_map(|source| source["age_ms"].as_i64())
+        .max();
     Ok(
-        json!({"sources":sources,"counts":counts,"observed_at_ms":crate::now_ms(),"coverage":"Projected-message snapshots plus available durable events. Historical event replay may be unavailable; never a complete diagnostic or token-stream archive.","retention":"Removed upstream sessions are hidden, but retained locally until index rebuild. Index contains private transcript data."}),
+        json!({"sources":sources,"counts":counts,"observed_at_ms":crate::now_ms(),"stale":stale,"max_source_age_ms":max_source_age_ms,"stale_after_ms":STALE_AFTER_MS,"coverage":"Projected-message snapshots plus available durable events. Historical event replay may be unavailable; never a complete diagnostic or token-stream archive.","retention":"Removed upstream sessions are hidden, but retained locally until index rebuild. Index contains private transcript data."}),
     )
+}
+
+fn schema_version(c: &Connection) -> Result<i64> {
+    Ok(c.pragma_query_value(None, "user_version", |row| row.get(0))?)
+}
+
+fn file_len(path: &Path) -> Value {
+    std::fs::metadata(path)
+        .map(|meta| json!(meta.len()))
+        .unwrap_or(Value::Null)
+}
+
+fn wal_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}-wal", path.display()))
+}
+
+/// Describe the semantic snapshot beside the index, if any. Metadata only: the
+/// manifest contains no transcript text.
+fn semantic_manifest(path: &Path) -> Value {
+    let manifest = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("semantic/manifest.json");
+    match std::fs::read(manifest) {
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(v) => json!({
+                "method": v["method"],
+                "documents": v["documents"],
+                "dimensions": v["dimensions"],
+                "built_at_ms": v["built_at_ms"],
+                "corpus_hash": v["corpus_hash"],
+                "coverage": "Local LSA snapshot; changed/deleted candidates are excluded at query time. Not a pretrained neural encoder.",
+            }),
+            Err(_) => json!({"error":"Semantic manifest is unreadable; rebuild the local model"}),
+        },
+        Err(_) => Value::Null,
+    }
 }
 
 fn validate(q: &Query) -> Result<()> {

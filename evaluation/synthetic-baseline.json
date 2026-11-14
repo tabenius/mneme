@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "note": "Synthetic smoke benchmark: constructed relevance on generated text. Not evidence of quality on real conversations.",
+  "dimensions": 32,
+  "corpus_sha256": "bc7448bd13ae90b4e56e4b2689d57326573b2076fb6f6aa312c7e8d622874a5f",
+  "floors": {
+    "ranked_fts": {
+      "ndcg_at_k": 0.55,
+      "recall_at_k": 0.55
+    },
+    "concept": {
+      "ndcg_at_k": 0.55,
+      "recall_at_k": 0.55
+    },
+    "hybrid": {
+      "ndcg_at_k": 0.5,
+      "recall_at_k": 0.5
+    },
+    "semantic": {
+      "recall_at_k": 0.4
+    }
+  },
+  "modes": {
+    "literal": {
+      "1": {
+        "precision": 1.0,
+        "precision_at_k": 0.230769,
+        "recall_at_k": 0.25,
+        "fdr": 0.0,
+        "ndcg_at_k": 0.25,
+        "mrr": 0.25
+      },
+      "5": {
+        "precision": 1.0,
+        "precision_at_k": 0.046154,
+        "recall_at_k": 0.25,
+        "fdr": 0.0,
+        "ndcg_at_k": 0.25,
+        "mrr": 0.25
+      },
+      "10": {
+        "precision": 1.0,
+        "precision_at_k": 0.023077,
+        "recall_at_k": 0.25,
+        "fdr": 0.0,
+        "ndcg_at_k": 0.25,
+        "mrr": 0.25
+      }
+    },
+    "fts": {
+      "1": {
+        "precision": 0.583333,
+        "precision_at_k": 0.134615,
+        "recall_at_k": 0.145833,
+        "fdr": 0.416667,
+        "ndcg_at_k": 0.145833,
+        "mrr": 0.145833
+      },
+      "5": {
+        "precision": 0.777778,
+        "precision_at_k": 0.046154,
+        "recall_at_k": 0.25,
+        "fdr": 0.222222,
+        "ndcg_at_k": 0.208827,
+        "mrr": 0.194444
+      },
+      "10": {
+        "precision": 0.777778,
+        "precision_at_k": 0.023077,
+        "recall_at_k": 0.25,
+        "fdr": 0.222222,
+        "ndcg_at_k": 0.208827,
+        "mrr": 0.194444
+      }
+    },
+    "ranked_fts": {
+      "1": {
+        "precision": 0.625,
+        "precision_at_k": 0.576923,
+        "recall_at_k": 0.361111,
+        "fdr": 0.375,
+        "ndcg_at_k": 0.625,
+        "mrr": 0.625
+      },
+      "5": {
+        "precision": 0.2125,
+        "precision_at_k": 0.196154,
+        "recall_at_k": 0.520833,
+        "fdr": 0.7875,
+        "ndcg_at_k": 0.52595,
+        "mrr": 0.694444
+      },
+      "10": {
+        "precision": 0.135417,
+        "precision_at_k": 0.125,
+        "recall_at_k": 0.618056,
+        "fdr": 0.864583,
+        "ndcg_at_k": 0.569767,
+        "mrr": 0.709284
+      }
+    },
+    "concept": {
+      "1": {
+        "precision": 0.8125,
+        "precision_at_k": 0.75,
+        "recall_at_k": 0.4375,
+        "fdr": 0.1875,
+        "ndcg_at_k": 0.8125,
+        "mrr": 0.8125
+      },
+      "5": {
+        "precision": 0.341667,
+        "precision_at_k": 0.315385,
+        "recall_at_k": 0.736111,
+        "fdr": 0.658333,
+        "ndcg_at_k": 0.744416,
+        "mrr": 0.838542
+      },
+      "10": {
+        "precision": 0.191667,
+        "precision_at_k": 0.176923,
+        "recall_at_k": 0.805556,
+        "fdr": 0.808333,
+        "ndcg_at_k": 0.776767,
+        "mrr": 0.84852
+      }
+    },
+    "semantic": {
+      "1": {
+        "precision": 0.583333,
+        "precision_at_k": 0.538462,
+        "recall_at_k": 0.319444,
+        "fdr": 0.416667,
+        "ndcg_at_k": 0.583333,
+        "mrr": 0.583333
+      },
+      "5": {
+        "precision": 0.195833,
+        "precision_at_k": 0.180769,
+        "recall_at_k": 0.493056,
+        "fdr": 0.804167,
+        "ndcg_at_k": 0.48907,
+        "mrr": 0.644097
+      },
+      "10": {
+        "precision": 0.11875,
+        "precision_at_k": 0.109615,
+        "recall_at_k": 0.5625,
+        "fdr": 0.88125,
+        "ndcg_at_k": 0.520435,
+        "mrr": 0.660499
+      }
+    },
+    "hybrid": {
+      "1": {
+        "precision": 0.708333,
+        "precision_at_k": 0.653846,
+        "recall_at_k": 0.375,
+        "fdr": 0.291667,
+        "ndcg_at_k": 0.708333,
+        "mrr": 0.708333
+      },
+      "5": {
+        "precision": 0.2875,
+        "precision_at_k": 0.265385,
+        "recall_at_k": 0.645833,
+        "fdr": 0.7125,
+        "ndcg_at_k": 0.641963,
+        "mrr": 0.761111
+      },
+      "10": {
+        "precision": 0.160417,
+        "precision_at_k": 0.148077,
+        "recall_at_k": 0.701389,
+        "fdr": 0.839583,
+        "ndcg_at_k": 0.667607,
+        "mrr": 0.769271
+      }
+    }
+  }
+}

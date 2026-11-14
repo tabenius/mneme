@@ -21,6 +21,11 @@ evaluation are implemented in 0.2. See [semantic scope](SEMANTIC.md) and
 [measured quality](RETRIEVAL-EVALUATION.md). Further improvements below remain
 open; implementation completion is not a claim that retrieval quality is solved.
 
+Structured index diagnostics (`ok`/`healthy`/`state`/`remedy`, stable error codes)
+and a committed synthetic retrieval regression gate are implemented. The gate
+exercises every search mode in CI but does not replace private-corpus quality
+evaluation in [retrieval evaluation](RETRIEVAL-EVALUATION.md).
+
 - Additional harness adapters, starting with Claude Code and Codex.
 - Global model-request diagnostics; not equivalent to persisted session events.
 - [x] Context-window navigation around a hit (`history_get_context`).
