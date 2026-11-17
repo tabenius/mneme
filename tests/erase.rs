@@ -109,7 +109,7 @@ fn semantic_model(dir: &std::path::Path) {
     std::fs::write(folder.join("lsa-1.npz"), format!("vectors {SECRET}")).unwrap();
     std::fs::write(folder.join("unrelated.txt"), "not ours").unwrap();
     let manifest = json!({"method": "lsa", "vocabulary": {SECRET: 0, "worktree": 1},
-        "keys": ["k1"], "managed_arrays": ["lsa-1.npz", "../escape"]});
+        "keys": ["k1"], "managed_arrays": ["lsa-1.npz"]});
     std::fs::write(folder.join("manifest.json"), manifest.to_string()).unwrap();
 }
 
@@ -133,7 +133,7 @@ fn erasure_discards_the_semantic_model_derived_from_erased_text() {
     );
     let folder = dir.path().join("semantic");
     assert!(!folder.join("manifest.json").exists() && !folder.join("lsa-1.npz").exists());
-    // Only files the model declared are removed; traversal names are ignored.
+    // Only files the model declared are removed; unrelated files stay.
     assert!(folder.join("unrelated.txt").exists());
     for entry in std::fs::read_dir(&folder).unwrap().flatten() {
         assert!(
@@ -159,4 +159,73 @@ fn keep_semantic_is_explicit_and_reported() {
     let applied = erase::hidden(&store, true, true).unwrap();
     assert!(applied["semantic_model"].as_str().unwrap().contains("kept"));
     assert!(dir.path().join("semantic/manifest.json").exists());
+}
+
+#[test]
+fn unsafe_managed_name_aborts_before_erasing_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(dir.path());
+    semantic_model(dir.path());
+    let folder = dir.path().join("semantic");
+    std::fs::write(
+        folder.join("manifest.json"),
+        json!({"managed_arrays":["lsa-1.npz","../escape"]}).to_string(),
+    )
+    .unwrap();
+    let error = erase::hidden(&store, true, false).unwrap_err();
+    assert!(error.to_string().contains("unsafe managed file name"));
+    assert!(folder.join("manifest.json").exists());
+    assert!(folder.join("lsa-1.npz").exists());
+    // The index rows were never touched, so a corrected retry can still work.
+    assert_eq!(
+        erase::hidden(&store, false, false).unwrap()["hidden"]["sessions"],
+        1
+    );
+}
+
+#[test]
+fn failed_model_removal_aborts_before_index_erasure() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(dir.path());
+    semantic_model(dir.path());
+    let folder = dir.path().join("semantic");
+    // A directory cannot be removed by remove_file: a deterministic failure.
+    std::fs::remove_file(folder.join("lsa-1.npz")).unwrap();
+    std::fs::create_dir(folder.join("lsa-1.npz")).unwrap();
+    let error = erase::hidden(&store, true, false).unwrap_err();
+    assert!(error.to_string().contains("manifest retained for retry"));
+    assert!(folder.join("manifest.json").exists());
+    assert_eq!(
+        erase::hidden(&store, false, false).unwrap()["hidden"]["sessions"],
+        1
+    );
+}
+
+#[test]
+fn interrupted_cleanup_is_reported_and_resumed() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(dir.path());
+    // Complete one erasure, then simulate a crash after the row delete commit
+    // but before WAL/VACUUM cleanup by setting the pending marker.
+    erase::hidden(&store, true, false).unwrap();
+    let connection = rusqlite::Connection::open(&store.path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO meta(key,value) VALUES('erase_pending',1) ON CONFLICT(key) DO UPDATE SET value=1",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let status = store
+        .query("history_index_status", &Query::default())
+        .unwrap();
+    assert_eq!(status["cleanup_pending"], true);
+    assert_eq!(status["healthy"], false);
+    let resumed = erase::hidden(&store, true, false).unwrap();
+    assert_eq!(resumed["resumed_cleanup"], true);
+    assert_eq!(resumed["cleanup_pending"], false);
+    let status = store
+        .query("history_index_status", &Query::default())
+        .unwrap();
+    assert_eq!(status["cleanup_pending"], false);
 }

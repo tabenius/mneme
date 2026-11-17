@@ -243,10 +243,16 @@ impl Store {
                 .iter()
                 .any(|source| source["connection"] == "degraded")
         });
+        let cleanup_pending = coverage
+            .get("cleanup_pending")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let ok = sessions > 0;
-        let healthy = ok && !stale && !degraded;
+        let healthy = ok && !stale && !degraded && !cleanup_pending;
         let remedy = if !ok {
             "Index is readable but empty. Start the collector: systemctl --user enable --now mneme-collector."
+        } else if cleanup_pending {
+            "A physical erasure was interrupted before WAL/VACUUM cleanup. Stop MCP readers and rerun `mneme erase --hidden --apply`."
         } else if degraded {
             "The collector reported an upstream error; see sources[].error and `systemctl --user status mneme-collector`."
         } else if stale {
@@ -258,6 +264,7 @@ impl Store {
             "ok": ok,
             "healthy": healthy,
             "state": if ok { "ready" } else { "empty" },
+            "cleanup_pending": cleanup_pending,
             "index": {
                 "path": self.path.display().to_string(),
                 "exists": true,
@@ -319,7 +326,7 @@ impl Store {
         c.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
         Ok(c)
     }
-    fn reader(&self) -> Result<Connection> {
+    pub(crate) fn reader(&self) -> Result<Connection> {
         let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .with_context(|| {
                 format!(
@@ -960,8 +967,9 @@ fn status(c: &Connection) -> Result<Value> {
             .as_i64()
             .map(|t| crate::now_ms().saturating_sub(t));
         source["age_ms"] = json!(age);
-        source["stale"] = json!(age.is_none_or(|age| age > 60_000));
+        source["stale"] = json!(age.is_none_or(|age| age > STALE_AFTER_MS));
     }
+    let cleanup_pending = erase_pending(c)?;
     let counts:Value=serde_json::from_str(&c.query_row("SELECT json_object('sessions',(SELECT count(*) FROM sessions WHERE deleted=0),'messages',(SELECT count(*) FROM messages m JOIN sessions s ON s.key=m.session_key WHERE s.deleted=0),'tool_runs',(SELECT count(*) FROM tool_runs t JOIN sessions s ON s.key=t.session_key WHERE s.deleted=0),'raw_events',(SELECT count(*) FROM events),'checkpoints',(SELECT count(*) FROM checkpoints))",[],|r|r.get::<_,String>(0))?)?;
     let stale = sources.is_empty()
         || sources
@@ -972,8 +980,18 @@ fn status(c: &Connection) -> Result<Value> {
         .filter_map(|source| source["age_ms"].as_i64())
         .max();
     Ok(
-        json!({"sources":sources,"counts":counts,"observed_at_ms":crate::now_ms(),"stale":stale,"max_source_age_ms":max_source_age_ms,"stale_after_ms":STALE_AFTER_MS,"coverage":"Projected-message snapshots plus available durable events. Historical event replay may be unavailable; never a complete diagnostic or token-stream archive.","retention":"Removed upstream sessions are hidden, but retained locally until index rebuild. Index contains private transcript data."}),
+        json!({"sources":sources,"counts":counts,"observed_at_ms":crate::now_ms(),"stale":stale,"max_source_age_ms":max_source_age_ms,"stale_after_ms":STALE_AFTER_MS,"cleanup_pending":cleanup_pending,"coverage":"Projected-message snapshots plus available durable events. Historical event replay may be unavailable; never a complete diagnostic or token-stream archive.","retention":"Removed upstream sessions are hidden, but retained locally until index rebuild. Index contains private transcript data."}),
     )
+}
+
+/// True when an erasure committed its row deletes but has not completed the
+/// WAL fold/VACUUM cleanup (or a previous run left the marker behind).
+fn erase_pending(c: &Connection) -> Result<bool> {
+    Ok(c.query_row(
+        "SELECT coalesce((SELECT value FROM meta WHERE key='erase_pending'),0)<>0",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 fn schema_version(c: &Connection) -> Result<i64> {
@@ -993,23 +1011,30 @@ fn wal_path(path: &Path) -> PathBuf {
 /// Describe the semantic snapshot beside the index, if any. Metadata only: the
 /// manifest contains no transcript text.
 fn semantic_manifest(path: &Path) -> Value {
+    use std::io::Read;
+    const LIMIT: u64 = 16 * 1024 * 1024;
     let manifest = path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("semantic/manifest.json");
-    match std::fs::read(manifest) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-            Ok(v) => json!({
-                "method": v["method"],
-                "documents": v["documents"],
-                "dimensions": v["dimensions"],
-                "built_at_ms": v["built_at_ms"],
-                "corpus_hash": v["corpus_hash"],
-                "coverage": "Local LSA snapshot; changed/deleted candidates are excluded at query time. Not a pretrained neural encoder.",
-            }),
-            Err(_) => json!({"error":"Semantic manifest is unreadable; rebuild the local model"}),
-        },
-        Err(_) => Value::Null,
+    let file = match std::fs::File::open(&manifest) {
+        Ok(file) => file,
+        Err(_) => return Value::Null,
+    };
+    let mut bytes = Vec::new();
+    if file.take(LIMIT + 1).read_to_end(&mut bytes).is_err() || bytes.len() as u64 > LIMIT {
+        return json!({"error":"Semantic manifest is unreadable or exceeds 16 MiB; rebuild the local model"});
+    }
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(v) => json!({
+            "method": v["method"],
+            "documents": v["documents"],
+            "dimensions": v["dimensions"],
+            "built_at_ms": v["built_at_ms"],
+            "corpus_hash": v["corpus_hash"],
+            "coverage": "Local LSA snapshot; changed/deleted candidates are excluded at query time. Not a pretrained neural encoder.",
+        }),
+        Err(_) => json!({"error":"Semantic manifest is unreadable; rebuild the local model"}),
     }
 }
 

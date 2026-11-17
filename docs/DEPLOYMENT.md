@@ -146,7 +146,17 @@ private index data remains until explicitly deleted by the owner.
   a 120-second total deadline. Individual JSON/log responses are capped at
   32 MiB. Notification streams rotate at that byte budget and reconcile again.
   These failures retain checkpoints for retry. Invalid continuation cursors
-  fail collection rather than treating a partial inventory as complete.
+  fail collection rather than treating a partial inventory as complete, and
+  pagination is capped at 1,000 pages / 100,000 rows per inventory.
+- An empty upstream session inventory would hide every indexed session, so it
+  is rejected by default. Pass `--allow-empty-inventory` only when the source
+  genuinely has no sessions left. The same applies to a single-pass
+  `mneme collect`.
+- Physical erasure commits an `erase_pending` marker before deleting rows. If
+  the process stops before the WAL fold/`VACUUM` cleanup, `mneme status`
+  reports `cleanup_pending: true` and the index is unhealthy until
+  `mneme erase --hidden --apply` is rerun. Model-file removal failures abort
+  before any index row is deleted, leaving the manifest intact for a retry.
 - MCP admits at most four concurrent query workers. Excess calls receive a
   retryable tool error. Semantic helpers have a 15-second deadline including
   input transfer, bounded output, and are killed/reaped on failure.
@@ -162,10 +172,12 @@ no index exists; they never start collection. Branch on these fields instead of
 parsing prose:
 
 - `ok`: the index is readable and contains at least one session.
-- `healthy`: `ok` and no source is stale or degraded.
+- `healthy`: `ok` and no source is stale or degraded, and no erasure cleanup is
+  pending.
 - `state`: `ready`, `empty`, `missing` or `unreadable`.
 - `index.stale`: no reconciliation within `stale_after_ms` (60 seconds).
 - `index.upstream_errors`: collector-reported upstream failures.
+- `cleanup_pending`: an erasure's WAL/`VACUUM` cleanup has not completed.
 - `remedy`: the operator action, or `null` when healthy.
 
 Every MCP tool error also carries a stable `code` (`index_missing`,
@@ -173,6 +185,23 @@ Every MCP tool error also carries a stable `code` (`index_missing`,
 `query_timeout`, `overloaded`, `query_failed`), a `hint`, `retryable`, and the
 same metadata-only `index` diagnosis. Diagnoses never include transcript text and
 are safe to log.
+
+### Physically erasing upstream-deleted sessions
+
+Removal only hides sessions until the owner chooses to erase them:
+
+```sh
+mneme --db PATH erase --hidden            # dry run: counts and model impact only
+mneme --db PATH erase --hidden --apply    # requires the collector to be stopped
+```
+
+`--apply` discards the local semantic model before deleting rows because the
+model is derived from the erased text (use `--keep-semantic` only if that
+exposure is acceptable, then rebuild with `mneme semantic-build` when the
+erasure is complete). Snapshots and backups made earlier are not reachable and
+must be pruned separately. A dry run opens the index read-only and never creates
+or modifies files.
+
 
 ## Optional semantic layer (0.2)
 
