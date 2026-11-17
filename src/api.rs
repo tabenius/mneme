@@ -106,10 +106,21 @@ impl Api {
     }
 
     async fn pages(&self, path: &str) -> Result<Vec<Value>> {
+        // Bound a broken or hostile upstream. Hitting a cap is an error, never
+        // a truncated inventory: a short inventory would hide sessions during
+        // reconciliation.
+        const MAX_PAGES: usize = 1000;
+        const MAX_ROWS: usize = 100_000;
         let mut result = Vec::new();
+        let mut pages = 0usize;
         let mut cursor = None::<String>;
         let mut seen = std::collections::HashSet::new();
         loop {
+            pages += 1;
+            anyhow::ensure!(
+                pages <= MAX_PAGES,
+                "API pagination exceeded {MAX_PAGES} pages; refusing a partial inventory"
+            );
             let mut query = vec![("limit", "100".to_owned())];
             if let Some(c) = cursor.as_ref() {
                 query.push(("cursor", c.clone()));
@@ -120,6 +131,10 @@ impl Api {
             let rows = page["data"]
                 .as_array()
                 .context("API page missing data array")?;
+            anyhow::ensure!(
+                result.len() + rows.len() <= MAX_ROWS,
+                "API inventory exceeds {MAX_ROWS} rows; refusing a partial inventory"
+            );
             result.extend(rows.iter().cloned());
             // A malformed continuation must never masquerade as a complete
             // inventory (which would hide sessions during reconciliation).

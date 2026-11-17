@@ -90,7 +90,9 @@ async fn paginated_backfill_sse_resume_and_reconciliation() {
     let store = Store::new(dir.path().join("index.sqlite"));
     store.init().unwrap();
     store.source("mock", "2.mock").unwrap();
-    collect::once(&api, &store, "mock", true).await.unwrap();
+    collect::once(&api, &store, "mock", true, false)
+        .await
+        .unwrap();
     assert_eq!(store.checkpoint("mock", "ses_mock").unwrap(), Some(4));
     let first = store
         .query("history_index_status", &Query::default())
@@ -102,7 +104,9 @@ async fn paginated_backfill_sse_resume_and_reconciliation() {
         .unwrap()["generation"]
         .clone();
     // Replay after the saved sequence and unchanged snapshot must not churn FTS or invalidate cursors.
-    collect::once(&api, &store, "mock", true).await.unwrap();
+    collect::once(&api, &store, "mock", true, false)
+        .await
+        .unwrap();
     let second = store
         .query("history_list_sessions", &Query::default())
         .unwrap();
@@ -177,7 +181,11 @@ async fn invalid_cursor_never_hides_previously_indexed_sessions() {
         .unwrap();
     let (url, server) = pages_server(vec![json!({"data":[],"cursor":{"next":42}})]).await;
     let api = Api::new(&url, &credential).unwrap();
-    assert!(collect::once(&api, &store, "mock", false).await.is_err());
+    assert!(
+        collect::once(&api, &store, "mock", false, false)
+            .await
+            .is_err()
+    );
     let listing = store
         .query("history_list_sessions", &Query::default())
         .unwrap();
@@ -196,7 +204,7 @@ async fn collector_retries_initial_outage_and_recovers() {
     drop(listener);
     let api = Api::new(&format!("http://{address}"), &credential).unwrap();
     let store = Store::new(dir.path().join("index.sqlite"));
-    let collector = tokio::spawn(collect::run(api, store.clone(), "mock".into(), 2));
+    let collector = tokio::spawn(collect::run(api, store.clone(), "mock".into(), 2, true));
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(
         !collector.is_finished(),
@@ -254,4 +262,66 @@ async fn collector_retries_initial_outage_and_recovers() {
         collect::lock(&store).is_ok(),
         "cancelled collector must release its writer lock"
     );
+}
+
+#[tokio::test]
+async fn empty_inventory_requires_an_explicit_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let credential = dir.path().join("credential.json");
+    std::fs::write(&credential, r#"{"password":"synthetic"}"#).unwrap();
+    let store = Store::new(dir.path().join("index.sqlite"));
+    store.init().unwrap();
+    store.source("mock", "2.mock").unwrap();
+    store
+        .ingest("mock", &json!({"id":"ses_kept"}), &[], &[])
+        .unwrap();
+
+    let (url, server) = pages_server(vec![json!({"data":[],"cursor":{"next":null}})]).await;
+    let api = Api::new(&url, &credential).unwrap();
+    let error = collect::once(&api, &store, "mock", false, false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("empty session inventory"));
+    let listing = store
+        .query("history_list_sessions", &Query::default())
+        .unwrap();
+    assert_eq!(listing["items"].as_array().unwrap().len(), 1);
+    server.await.unwrap();
+
+    let (url, server) = pages_server(vec![json!({"data":[],"cursor":{"next":null}})]).await;
+    let api = Api::new(&url, &credential).unwrap();
+    collect::once(&api, &store, "mock", false, true)
+        .await
+        .unwrap();
+    let listing = store
+        .query("history_list_sessions", &Query::default())
+        .unwrap();
+    assert_eq!(listing["items"], json!([]));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn pagination_caps_refuse_a_partial_inventory() {
+    let dir = tempfile::tempdir().unwrap();
+    let credential = dir.path().join("credential.json");
+    std::fs::write(&credential, r#"{"password":"synthetic"}"#).unwrap();
+    // One page more than the cap.
+    let pages: Vec<Value> = (0..=1000)
+        .map(|i| json!({"data":[],"cursor":{"next":format!("c{i}")}}))
+        .collect();
+    let (url, server) = pages_server(pages).await;
+    let api = Api::new(&url, &credential).unwrap();
+    let error = api.sessions().await.unwrap_err();
+    assert!(error.to_string().contains("pagination exceeded"));
+    server.abort();
+
+    // A single page with more rows than the cap is also refused.
+    let rows: Vec<Value> = (0..=100_000)
+        .map(|i| json!({"id":format!("s{i}")}))
+        .collect();
+    let (url, server) = pages_server(vec![json!({"data":rows,"cursor":{"next":null}})]).await;
+    let api = Api::new(&url, &credential).unwrap();
+    let error = api.sessions().await.unwrap_err();
+    assert!(error.to_string().contains("exceeds"));
+    server.await.unwrap();
 }

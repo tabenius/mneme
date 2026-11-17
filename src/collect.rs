@@ -16,8 +16,20 @@ pub fn lock(store: &Store) -> Result<std::fs::File> {
     Ok(lock)
 }
 
-pub async fn once(api: &Api, store: &Store, source: &str, force: bool) -> Result<Vec<Value>> {
+pub async fn once(
+    api: &Api,
+    store: &Store,
+    source: &str,
+    force: bool,
+    allow_empty: bool,
+) -> Result<Vec<Value>> {
     let sessions = api.sessions().await?;
+    // An empty inventory hides every previously indexed session. Treat it as a
+    // suspicious upstream result unless the operator explicitly allowed it.
+    anyhow::ensure!(
+        allow_empty || !sessions.is_empty(),
+        "Upstream returned an empty session inventory; refusing to hide all indexed sessions (pass --allow-empty-inventory to confirm)"
+    );
     let mut ids = std::collections::HashSet::new();
     for session in &sessions {
         let sid = session["id"].as_str().context("session missing id")?;
@@ -69,7 +81,13 @@ pub async fn once(api: &Api, store: &Store, source: &str, force: bool) -> Result
     Ok(sessions)
 }
 
-pub async fn run(api: Api, store: Store, source: String, interval_secs: u64) -> Result<()> {
+pub async fn run(
+    api: Api,
+    store: Store,
+    source: String,
+    interval_secs: u64,
+    allow_empty: bool,
+) -> Result<()> {
     anyhow::ensure!(
         (2..=3600).contains(&interval_secs),
         "interval must be 2..3600 seconds"
@@ -113,7 +131,7 @@ pub async fn run(api: Api, store: Store, source: String, interval_secs: u64) -> 
         let force = last_force.elapsed() >= Duration::from_secs(60);
         let result = tokio::select! {
             _=&mut shutdown=>break,
-            result=once(&api,&store,&source,force)=>result,
+            result=once(&api,&store,&source,force,allow_empty)=>result,
         };
         match result {
             Ok(mut sessions) => {

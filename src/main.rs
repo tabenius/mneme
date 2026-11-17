@@ -39,6 +39,9 @@ enum Command {
         follow: bool,
         #[arg(long, default_value_t = 15)]
         interval: u64,
+        /// Permit an empty upstream session inventory (hides all indexed sessions).
+        #[arg(long)]
+        allow_empty_inventory: bool,
     },
     /// Run a read-only stdio MCP server. Never starts an ingestion worker.
     Mcp,
@@ -178,6 +181,7 @@ async fn main() -> Result<()> {
             source,
             follow,
             interval,
+            allow_empty_inventory,
         } => {
             anyhow::ensure!(
                 !source.is_empty() && source.len() <= 128,
@@ -185,13 +189,13 @@ async fn main() -> Result<()> {
             );
             let api = Api::new(&url, &password_file)?;
             if follow {
-                collect::run(api, store, source, interval).await?;
+                collect::run(api, store, source, interval, allow_empty_inventory).await?;
             } else {
                 store.init()?;
                 let _lock = collect::lock(&store)?;
                 let info = api.verify().await?;
                 store.source(&source, info["version"].as_str().unwrap_or("unknown"))?;
-                collect::once(&api, &store, &source, true).await?;
+                collect::once(&api, &store, &source, true, allow_empty_inventory).await?;
                 println!(
                     "{}",
                     store.query("history_index_status", &Query::default())?
