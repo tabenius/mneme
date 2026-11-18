@@ -95,48 +95,70 @@ pub fn hidden(store: &Store, apply: bool, keep_semantic: bool) -> Result<Value> 
         let removed = discard_semantic(dir)?;
         report["semantic_model"] = json!({"discarded": removed, "rebuild": "mneme semantic-build"});
     }
-    // Overwrite freed content instead of leaving it in free pages.
-    c.pragma_update(None, "secure_delete", "ON")?;
     if hidden_sessions > 0 {
         // Persist the intent before deleting: a crash after this commit but
         // before the WAL/VACUUM cleanup is resumed by the next invocation.
-        c.execute(
-            "INSERT INTO meta(key,value) VALUES(?1,1) ON CONFLICT(key) DO UPDATE SET value=1",
-            [PENDING],
-        )?;
+        mark_pending(&c)?;
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(
-            "CREATE TEMP TABLE doomed AS SELECT key,source,id FROM sessions WHERE deleted<>0;
-             DELETE FROM events WHERE EXISTS (SELECT 1 FROM doomed d WHERE d.source=events.source AND d.id=events.session_id);
-             DELETE FROM checkpoints WHERE EXISTS (SELECT 1 FROM doomed d WHERE d.source=checkpoints.source AND d.id=checkpoints.session_id);
-             DELETE FROM snapshot_hashes WHERE session_key IN (SELECT key FROM doomed);
-             DELETE FROM tool_runs WHERE session_key IN (SELECT key FROM doomed);
-             DELETE FROM messages WHERE session_key IN (SELECT key FROM doomed);
-             DELETE FROM sessions WHERE key IN (SELECT key FROM doomed);
-             DROP TABLE doomed;
-             UPDATE meta SET value=value+1 WHERE key='generation';",
+            "CREATE TEMP TABLE doomed AS SELECT key,source,id FROM sessions WHERE deleted<>0;",
         )?;
-        // External-content FTS5 deletes are tombstones; merging drops the old tokens.
-        tx.execute(
-            "INSERT INTO message_fts(message_fts) VALUES('optimize')",
-            [],
-        )?;
+        delete_doomed(&tx)?;
         tx.commit()?;
         report["erased"] = report["hidden"].take();
     } else {
         report["resumed_cleanup"] = json!(true);
     }
-    // Old page images can survive in the WAL; fold and truncate it, rewrite the
-    // file, then truncate again so VACUUM's own WAL frames are gone too. Any
-    // error leaves the marker in place so the cleanup can be retried.
-    let mut busy = checkpoint(&c)?;
-    c.execute_batch("VACUUM;")?;
-    busy |= checkpoint(&c)?;
+    finish_cleanup(&c, &mut report)?;
     let remaining = counts(&c)?;
     anyhow::ensure!(
         remaining["sessions"].as_i64() == Some(0),
         "hidden sessions remain after erasure"
     );
+    report["hidden"] = remaining;
+    Ok(report)
+}
+
+/// Make SQLite overwrite freed content and persist the cleanup intent before
+/// rows are deleted. A crash after this commit but before the WAL/VACUUM
+/// cleanup is resumed by the next invocation.
+pub(crate) fn mark_pending(c: &rusqlite::Connection) -> Result<()> {
+    c.pragma_update(None, "secure_delete", "ON")?;
+    c.execute(
+        "INSERT INTO meta(key,value) VALUES(?1,1) ON CONFLICT(key) DO UPDATE SET value=1",
+        [PENDING],
+    )?;
+    Ok(())
+}
+
+/// Delete every row that belongs to the sessions listed in the temp `doomed`
+/// table (`key`, `source`, `id`), merge the full-text index and advance the
+/// generation counter. Caller owns and commits the transaction.
+pub(crate) fn delete_doomed(tx: &rusqlite::Connection) -> Result<()> {
+    tx.execute_batch(
+        "DELETE FROM events WHERE EXISTS (SELECT 1 FROM doomed d WHERE d.source=events.source AND d.id=events.session_id);
+         DELETE FROM checkpoints WHERE EXISTS (SELECT 1 FROM doomed d WHERE d.source=checkpoints.source AND d.id=checkpoints.session_id);
+         DELETE FROM snapshot_hashes WHERE session_key IN (SELECT key FROM doomed);
+         DELETE FROM tool_runs WHERE session_key IN (SELECT key FROM doomed);
+         DELETE FROM messages WHERE session_key IN (SELECT key FROM doomed);
+         DELETE FROM sessions WHERE key IN (SELECT key FROM doomed);
+         UPDATE meta SET value=value+1 WHERE key='generation';",
+    )?;
+    // External-content FTS5 deletes are tombstones; merging drops the old tokens.
+    tx.execute(
+        "INSERT INTO message_fts(message_fts) VALUES('optimize')",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Physically finish a deletion: fold and truncate the WAL, rewrite the file,
+/// then truncate again so VACUUM's own WAL frames are gone too. Any error
+/// leaves the marker in place so the cleanup can be retried.
+pub(crate) fn finish_cleanup(c: &rusqlite::Connection, report: &mut Value) -> Result<()> {
+    let mut busy = checkpoint(c)?;
+    c.execute_batch("VACUUM;")?;
+    busy |= checkpoint(c)?;
     if busy == 0 {
         c.execute("DELETE FROM meta WHERE key=?1", [PENDING])?;
         report["cleanup_pending"] = json!(false);
@@ -146,9 +168,8 @@ pub fn hidden(store: &Store, apply: bool, keep_semantic: bool) -> Result<Value> 
             "A reader held the WAL open; old pages may persist in it and cleanup is still pending. Re-run when MCP clients are idle."
         );
     }
-    report["hidden"] = remaining;
     report["wal_checkpoint_busy"] = json!(busy != 0);
-    Ok(report)
+    Ok(())
 }
 
 fn counts(c: &rusqlite::Connection) -> Result<Value> {
@@ -157,7 +178,7 @@ fn counts(c: &rusqlite::Connection) -> Result<Value> {
     )?)
 }
 
-fn pending(c: &rusqlite::Connection) -> Result<bool> {
+pub(crate) fn pending(c: &rusqlite::Connection) -> Result<bool> {
     Ok(c.query_row(
         "SELECT coalesce((SELECT value FROM meta WHERE key=?1),0)<>0",
         [PENDING],
@@ -179,7 +200,7 @@ fn checkpoint(c: &rusqlite::Connection) -> Result<i64> {
 /// directory is touched. Unsafe names or failed removals abort with the
 /// manifest intact, so the cleanup can be retried instead of silently
 /// leaving derived text behind.
-fn discard_semantic(dir: &Path) -> Result<Vec<String>> {
+pub(crate) fn discard_semantic(dir: &Path) -> Result<Vec<String>> {
     use fs2::FileExt;
     let lock = std::fs::OpenOptions::new()
         .create(true)
