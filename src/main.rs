@@ -163,7 +163,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let store = Store::new(args.db.unwrap_or_else(default_db));
     match args.command {
-        Command::Evac { command: EvacCommand::Verify { bundle } } => {
+        Command::Evac {
+            command: EvacCommand::Verify { bundle },
+        } => {
             let summary = evac::inspect(&bundle)?;
             println!("{}", serde_json::to_string(&summary)?);
         }
