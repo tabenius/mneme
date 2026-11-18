@@ -201,3 +201,17 @@ Mneme can produce minimal viable handoffs (MVH) for active projects to feed the 
 Implemented explicit-input `evac build` and opt-in `evac push` usage, validation,
 privacy boundaries and limits are in [the producer guide](docs/HYPOMNEMA-LOCAL.md).
 The original Hypomnema document is a design draft, not deployment evidence.
+
+## License
+
+Copyright (C) 2026 Tobias Abenius.
+
+Mneme is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See [`LICENSE`](LICENSE) for the full text.
+
+SPDX: `GPL-3.0-or-later`. Dependencies and vendored assets keep their own
+licenses.
