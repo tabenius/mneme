@@ -340,6 +340,21 @@ impl Store {
         c.progress_handler(10_000, Some(move || std::time::Instant::now() > deadline));
         Ok(c)
     }
+    /// Read-only connection without the interactive 3-second deadline, for
+    /// maintenance scans (retention planning) that legitimately take longer.
+    /// It still cannot write: the database is opened read-only and query-only.
+    pub(crate) fn maintenance_reader(&self) -> Result<Connection> {
+        let c = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| {
+                format!(
+                    "Cannot read index at {}; run mneme collect and check collector health",
+                    self.path.display()
+                )
+            })?;
+        c.busy_timeout(Duration::from_secs(30))?;
+        c.execute_batch("PRAGMA query_only=ON; BEGIN;")?;
+        Ok(c)
+    }
     pub fn source(&self, id: &str, version: &str) -> Result<()> {
         self.writer()?.execute("INSERT INTO sources(id,version) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET version=excluded.version", params![id,version])?;
         Ok(())

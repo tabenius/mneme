@@ -79,10 +79,11 @@ pub fn prune_locked(
         "retention needs an age or size bound"
     );
     // A dry run must not open the index read-write (or create side files).
+    // It also may scan the whole index, so avoid the interactive query deadline.
     let mut c = if apply {
         store.writer()?
     } else {
-        store.reader()?
+        store.maintenance_reader()?
     };
     let pending = erase::pending(&c)?;
     let index_bytes = file_bytes(&store.path);
@@ -199,7 +200,7 @@ pub fn clear_retention(store: &Store, source: Option<&str>, apply: bool) -> Resu
         return Ok(json!({"dry_run": !apply, "cleared": 0}));
     }
     if !apply {
-        let c = store.reader()?;
+        let c = store.maintenance_reader()?;
         let cleared = count_watermarks(&c, source)?;
         return Ok(json!({"dry_run": true, "cleared": cleared}));
     }
