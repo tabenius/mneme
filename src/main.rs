@@ -129,6 +129,11 @@ enum SnapshotCommand {
 
 #[derive(Subcommand)]
 enum EvacCommand {
+    /// Read-only integrity verification of an explicit local gzip bundle; no index or network.
+    Verify {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
     /// Explicitly upload a reviewed bundle; credentials are never discovered.
     Push {
         #[arg(long)]
@@ -158,6 +163,12 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let store = Store::new(args.db.unwrap_or_else(default_db));
     match args.command {
+        Command::Evac {
+            command: EvacCommand::Verify { bundle },
+        } => {
+            let summary = evac::inspect(&bundle)?;
+            println!("{}", serde_json::to_string(&summary)?);
+        }
         Command::Evac {
             command:
                 EvacCommand::Push {

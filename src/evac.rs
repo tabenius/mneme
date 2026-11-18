@@ -257,12 +257,15 @@ fn push_url(endpoint: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 
-/// Explicit upload, never invoked by build/collect/MCP. No retries or redirects.
-pub async fn push(bundle_path: &Path, credential_file: &Path, endpoint: &str) -> Result<Summary> {
-    let url = push_url(endpoint)?;
-    let compressed = bounded_file(bundle_path, MAX_GZIP_BYTES)?;
+/// Validate a reviewed evacuation bundle without opening an index or using the network.
+/// Text in the returned handoffs remains an untrusted caller claim.
+fn validate_bundle_bytes(compressed: &[u8]) -> Result<Bundle> {
+    ensure!(
+        compressed.len() <= MAX_GZIP_BYTES,
+        "bundle exceeds compressed limit"
+    );
     let mut json = Vec::new();
-    flate2::read::GzDecoder::new(compressed.as_slice())
+    flate2::read::MultiGzDecoder::new(compressed)
         .take(MAX_JSON_BYTES as u64 + 1)
         .read_to_end(&mut json)
         .context("decode bundle gzip")?;
@@ -311,6 +314,27 @@ pub async fn push(bundle_path: &Path, credential_file: &Path, endpoint: &str) ->
             "item integrity mismatch"
         );
     }
+    Ok(bundle)
+}
+
+/// Local, read-only integrity inspection. Only metadata is printed by the CLI.
+pub fn inspect(path: &Path) -> Result<Summary> {
+    let compressed = bounded_file(path, MAX_GZIP_BYTES)?;
+    let bundle = validate_bundle_bytes(&compressed)?;
+    Ok(Summary {
+        schema: "hypomnema.bundle.v1",
+        bundle_id: bundle.bundle_id,
+        item_count: bundle.items.len(),
+        size_bytes: compressed.len(),
+        sha256: sha256(&compressed),
+    })
+}
+
+/// Explicit upload, never invoked by build/collect/MCP. No retries or redirects.
+pub async fn push(bundle_path: &Path, credential_file: &Path, endpoint: &str) -> Result<Summary> {
+    let url = push_url(endpoint)?;
+    let compressed = bounded_file(bundle_path, MAX_GZIP_BYTES)?;
+    let bundle = validate_bundle_bytes(&compressed)?;
     let body = serde_json::to_vec(&serde_json::json!({
         "schema": bundle.schema, "bundle_id": bundle.bundle_id, "name": bundle.name,
         "observed_at": bundle.observed_at, "items": bundle.items,
