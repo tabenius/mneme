@@ -260,7 +260,10 @@ fn push_url(endpoint: &str) -> Result<reqwest::Url> {
 /// Validate a reviewed evacuation bundle without opening an index or using the network.
 /// Text in the returned handoffs remains an untrusted caller claim.
 fn validate_bundle_bytes(compressed: &[u8]) -> Result<Bundle> {
-    ensure!(compressed.len() <= MAX_GZIP_BYTES, "bundle exceeds compressed limit");
+    ensure!(
+        compressed.len() <= MAX_GZIP_BYTES,
+        "bundle exceeds compressed limit"
+    );
     let mut json = Vec::new();
     flate2::read::MultiGzDecoder::new(compressed)
         .take(MAX_JSON_BYTES as u64 + 1)
