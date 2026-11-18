@@ -82,7 +82,7 @@ struct Cursor {
     id: String,
 }
 
-const SCHEMA: &str = r#"
+pub(crate) const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT OR IGNORE INTO meta VALUES('generation',0);
 CREATE TABLE IF NOT EXISTS sources(

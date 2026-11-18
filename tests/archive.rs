@@ -2,7 +2,29 @@ use ragbaz_mneme::{
     archive,
     store::{Query, Store},
 };
+use rusqlite::Connection;
 use serde_json::{Value, json};
+use std::path::Path;
+
+fn mutate(path: &Path, sql: &str) {
+    let c = Connection::open(path).unwrap();
+    c.execute_batch("PRAGMA journal_mode=DELETE;").unwrap();
+    c.execute_batch(sql).unwrap();
+    drop(c);
+    for suffix in ["-wal", "-shm", "-journal"] {
+        assert!(
+            !Path::new(&format!("{}{suffix}", path.display())).exists(),
+            "mutation left a {suffix} sidecar"
+        );
+    }
+}
+
+fn snapshot(dir: &Path) -> (Store, std::path::PathBuf, Value) {
+    let store = fixture(dir);
+    let out = dir.join("snap.sqlite");
+    let manifest = archive::create(&store, &out).unwrap();
+    (store, out, manifest)
+}
 
 fn fixture(dir: &std::path::Path) -> Store {
     let store = Store::new(dir.join("index.sqlite"));
@@ -26,13 +48,30 @@ fn fixture(dir: &std::path::Path) -> Store {
 #[test]
 fn snapshot_is_consistent_verified_and_never_overwrites() {
     let dir = tempfile::tempdir().unwrap();
-    let store = fixture(dir.path());
-    let out = dir.path().join("snap.sqlite");
-    let manifest = archive::create(&store, &out).unwrap();
+    let (store, out, manifest) = snapshot(dir.path());
     assert_eq!(manifest["schema"], archive::SNAPSHOT_SCHEMA);
     assert_eq!(manifest["integrity"], "ok");
     assert_eq!(manifest["counts"]["messages"], 7);
     assert_eq!(manifest["sources"][0]["source"], "fixture");
+    // The owner contract rebsync consumes: stable schema name, integrity verdict,
+    // a lowercase digest and a byte count that matches the published file.
+    assert_eq!(
+        manifest["sha256"].as_str().unwrap().len(),
+        64,
+        "digest must be full SHA-256"
+    );
+    assert!(
+        manifest["sha256"]
+            .as_str()
+            .unwrap()
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    );
+    assert_eq!(
+        manifest["bytes"].as_u64().unwrap(),
+        std::fs::metadata(&out).unwrap().len()
+    );
+    assert!(manifest["generation"].is_i64());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -54,6 +93,110 @@ fn snapshot_is_consistent_verified_and_never_overwrites() {
         archive::create(&store, &out).is_err(),
         "overwrote a snapshot"
     );
+    // Re-exporting an unchanged index is byte-identical, which is what lets
+    // rebsync reuse its content-addressed chunks.
+    let second = dir.path().join("snap2.sqlite");
+    let manifest2 = archive::create(&store, &second).unwrap();
+    assert_eq!(manifest2["sha256"], manifest["sha256"]);
+    assert_eq!(manifest2["bytes"], manifest["bytes"]);
+}
+
+#[test]
+fn verify_is_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, out, manifest) = snapshot(dir.path());
+    let before = std::fs::read(&out).unwrap();
+    let before_meta = std::fs::metadata(&out).unwrap();
+    archive::verify(&out, Some(manifest["sha256"].as_str().unwrap())).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), before);
+    let after_meta = std::fs::metadata(&out).unwrap();
+    assert_eq!(after_meta.len(), before_meta.len());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(after_meta.mtime(), before_meta.mtime());
+        assert_eq!(after_meta.mtime_nsec(), before_meta.mtime_nsec());
+    }
+    for suffix in ["-wal", "-shm", "-journal"] {
+        assert!(!Path::new(&format!("{}{suffix}", out.display())).exists());
+    }
+}
+
+#[test]
+fn verify_rejects_schema_drift_and_unknown_versions() {
+    // An extra object is not a Mneme index even though SQLite can read it.
+    let dir = tempfile::tempdir().unwrap();
+    let (_, out, _) = snapshot(dir.path());
+    let extra = dir.path().join("extra.sqlite");
+    std::fs::copy(&out, &extra).unwrap();
+    mutate(&extra, "CREATE TABLE injected(x INTEGER);");
+    assert!(archive::verify(&extra, None).is_err());
+
+    // A redefined trigger keeps the name but changes the owner's definition.
+    let trigger = dir.path().join("trigger.sqlite");
+    std::fs::copy(&out, &trigger).unwrap();
+    mutate(
+        &trigger,
+        "DROP TRIGGER messages_ai;
+         CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN SELECT 1; END;",
+    );
+    assert!(archive::verify(&trigger, None).is_err());
+
+    // Exact version enforcement: older schemas were never released.
+    let version = dir.path().join("version.sqlite");
+    std::fs::copy(&out, &version).unwrap();
+    mutate(&version, "PRAGMA user_version=1;");
+    assert!(archive::verify(&version, None).is_err());
+    let future = dir.path().join("future.sqlite");
+    std::fs::copy(&out, &future).unwrap();
+    mutate(&future, "PRAGMA user_version=3;");
+    assert!(archive::verify(&future, None).is_err());
+}
+
+#[test]
+fn verify_rejects_foreign_key_and_fts_problems() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, out, _) = snapshot(dir.path());
+
+    let fk = dir.path().join("fk.sqlite");
+    std::fs::copy(&out, &fk).unwrap();
+    mutate(
+        &fk,
+        "PRAGMA foreign_keys=OFF;
+         INSERT INTO messages(key,session_key,id,role,created,text,raw)
+         VALUES('orphan','no-such-session','m','user',1,'x','{}');",
+    );
+    let error = archive::verify(&fk, None).unwrap_err().to_string();
+    assert!(error.contains("foreign-key"), "unexpected error: {error}");
+
+    // One real docsize row replaced by an orphan keeps the counts equal but
+    // proves the full-text index does not describe the message table.
+    let fts = dir.path().join("fts.sqlite");
+    std::fs::copy(&out, &fts).unwrap();
+    mutate(
+        &fts,
+        "DELETE FROM message_fts_docsize WHERE id=(SELECT min(id) FROM message_fts_docsize);
+         INSERT INTO message_fts_docsize(id,sz) VALUES(999999,x'00');",
+    );
+    let error = archive::verify(&fts, None).unwrap_err().to_string();
+    assert!(
+        error.contains("full-text index"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn verify_rejects_sidecars_and_unowned_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, out, _) = snapshot(dir.path());
+    let wal = Path::new(&format!("{}-wal", out.display())).to_path_buf();
+    std::fs::write(&wal, b"").unwrap();
+    assert!(archive::verify(&out, None).is_err());
+    std::fs::remove_file(&wal).unwrap();
+
+    // `create` must not export an index this binary does not own.
+    mutate(&store.path, "PRAGMA user_version=3;");
+    assert!(archive::create(&store, &dir.path().join("drift.sqlite")).is_err());
 }
 
 #[test]
