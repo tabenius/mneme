@@ -123,6 +123,13 @@ only Mneme. Back up the SQLite database through SQLite's backup API before a
 schema upgrade; copying only a live main file omits WAL state. Version 0.1 reads
 schema version 2 and upgrades the initial local schema-1 foundation in place.
 
+For a consistent, restorable copy use `mneme snapshot create` and keep the
+returned SHA-256. `mneme snapshot verify FILE --sha256 HEX` re-checks the file
+with the same exact schema/version, integrity, foreign-key and FTS checks that
+`create` and `restore` use, and refuses sidecars or a file replaced during
+verification. See [snapshots and backup](SNAPSHOTS.md) for the owner contract,
+compatibility policy and threat model.
+
 Removing the MCP config and disabling this exact unit removes integration;
 private index data remains until explicitly deleted by the owner.
 

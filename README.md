@@ -117,12 +117,19 @@ mneme --db /private/new-index.sqlite snapshot restore --from /private/mneme-2026
 
 `create` uses `VACUUM INTO` (one consistent read transaction; the collector may
 keep running), switches the copy to a self-contained rollback journal, runs
-`PRAGMA integrity_check`, checks required tables and FTS row parity, hashes it,
-and only then publishes it under its final name. It never overwrites. The JSON
-manifest reports schema, generation, counts, sources (without upstream errors),
-size and SHA-256. `verify` is read-only and is the validator other tools such as
-rebsync call. `restore` verifies, copies owner-only, refuses any existing index
-or WAL/SHM sidecar, then re-enters normal WAL operation through `init`.
+`PRAGMA integrity_check`, `PRAGMA foreign_key_check`, an exact schema/version
+check and FTS row parity, hashes the file, and only then publishes it under its
+final name. It never overwrites, refuses to export an index whose
+`user_version`/schema this binary does not own, and re-exports an unchanged index
+byte-identically. The JSON manifest reports schema, generation, counts, sources
+(without upstream errors), size and SHA-256. `verify` is read-only, rejects
+sidecars, schema drift, unknown versions, foreign-key or FTS inconsistencies and
+concurrent file replacement, and is the validator other tools such as rebsync
+call. `restore` verifies, copies owner-only, refuses any existing index or
+WAL/SHM sidecar, then re-enters normal WAL operation through `init`.
+
+The full owner contract, compatibility policy and threat model are in
+[snapshots and backup](docs/SNAPSHOTS.md).
 
 Snapshots contain private plaintext transcripts. Encrypt before they leave the
 machine; [rebsync](https://github.com/tabenius/rebsync) does this through restic
