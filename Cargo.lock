@@ -1095,6 +1095,7 @@ dependencies = [
  "flate2",
  "fs2",
  "futures-util",
+ "getrandom 0.4.3",
  "reqwest",
  "rmcp",
  "rusqlite",

@@ -186,6 +186,27 @@ def run(binary, workdir, dimensions):
     }
 
 
+def fuzzy_report():
+    docs, queries, _ = corpus.build()
+    rank = evaluate.fuzzy_rankers(docs)
+    universe = {doc["doc_id"] for doc in docs}
+    report = {}
+    for variant in ("original", "one_substitution"):
+        results = {}
+        for query in queries:
+            text = query["query"]
+            if variant == "one_substitution":
+                term = max(engine.tokens(text), key=len, default="")
+                if len(term) >= 5:
+                    offset = text.lower().find(term) + len(term) // 2
+                    change = "q" if text[offset] == "x" else "x"
+                    text = text[:offset] + change + text[offset + 1 :]
+            for mode, order in rank(text).items():
+                results.setdefault(mode, []).append(metric_set(order, query["relevant"], universe, 5))
+        report[variant] = {mode: summarize(rows) for mode, rows in results.items()}
+    return report
+
+
 def evaluate_gate(report, baseline):
     failures = []
     for mode, floors in FLOORS.items():
@@ -228,7 +249,11 @@ def main():
     parser.add_argument("--update-baseline", action="store_true")
     parser.add_argument("--dimensions", type=int, default=32)
     parser.add_argument("--json", action="store_true", help="Print the full report")
+    parser.add_argument("--offline-fuzzy", action="store_true", help="Print exploratory synthetic fuzzy metrics and exit")
     args = parser.parse_args()
+    if args.offline_fuzzy:
+        print(json.dumps(fuzzy_report(), indent=2))
+        return
     binary = str(Path(args.binary).resolve())
     if not Path(binary).exists():
         raise SystemExit(f"Binary not found: {binary} (run cargo build first)")

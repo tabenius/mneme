@@ -50,8 +50,11 @@ enum Command {
         #[arg(long, env = "MNEME_MAX_SIZE", value_parser = retain::parse_size)]
         max_size: Option<u64>,
     },
-    /// Run a read-only stdio MCP server. Never starts an ingestion worker.
-    Mcp,
+    /// Run the stdio MCP server. Pass --admin to enable local administration.
+    Mcp {
+        #[arg(long)]
+        admin: bool,
+    },
     /// Run one of the MCP queries locally; args is JSON, not SQL.
     Query {
         tool: String,
@@ -276,11 +279,13 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        Command::Mcp => {
+        Command::Mcp { admin } => {
             // Discovery must work even while the collector is unavailable or
             // creating its first index. Each call opens the index afresh and
             // reports errors without terminating the MCP transport.
-            let service = History { store }.serve(rmcp::transport::stdio()).await?;
+            let service = History { store, admin }
+                .serve(rmcp::transport::stdio())
+                .await?;
             service.waiting().await?;
         }
         Command::Query { tool, args } => {

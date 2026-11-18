@@ -59,7 +59,7 @@ Maintainer: Mneme maintainers <noreply@github.com>
 Homepage: https://github.com/tabenius/mneme
 Recommends: python3
 Suggests: python3-numpy
-Description: Evidence-oriented local session history index and read-only MCP server
+Description: Evidence-oriented local session history index and MCP server
  Static Linux binary, optional local Python semantic helpers, and user service
  templates. Installing this package does not start or restart any service.
 EOF

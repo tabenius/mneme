@@ -99,7 +99,7 @@ class McpRecovery(unittest.TestCase):
                     "clientInfo": {"name": "recovery-test", "version": "1"},
                 }, 1)
                 request("notifications/initialized", {}, None)
-                self.assertEqual(len(request("tools/list", {}, 2)["tools"]), 11)
+                self.assertEqual(len(request("tools/list", {}, 2)["tools"]), 15)
                 missing = status(3)
                 self.assertFalse(missing["isError"])
                 self.assertEqual(missing["structuredContent"]["state"], "missing")

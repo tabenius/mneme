@@ -55,8 +55,10 @@ with subprocess.Popen(
     send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tools = response()["tools"]
-    assert len(tools) == 11
-    assert all(t["annotations"]["readOnlyHint"] for t in tools)
+    assert len(tools) == 15
+    assert {t["name"] for t in tools if not t["annotations"]["readOnlyHint"]} == {
+        "history_update_settings", "history_reclaim_space", "history_record_evaluation",
+    }
 
     def call(name, arguments):
         send(

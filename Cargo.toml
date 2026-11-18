@@ -2,7 +2,7 @@
 name = "ragbaz-mneme"
 version = "0.2.1"
 edition = "2024"
-description = "Local, evidence-oriented session history index and read-only MCP server"
+description = "Local, evidence-oriented session history index and MCP server"
 license = "GPL-3.0-or-later"
 
 [[bin]]
@@ -15,6 +15,7 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 eventsource-stream = "0.2"
 flate2 = "1"
+getrandom = "0.4"
 fs2 = "0.4"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

@@ -3,6 +3,7 @@ pub mod archive;
 pub mod collect;
 pub mod erase;
 pub mod evac;
+pub mod instance;
 pub mod mcp;
 pub mod retain;
 pub mod semantic;

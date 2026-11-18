@@ -135,6 +135,73 @@ def models():
     }
 
 
+def trigrams(word):
+    padded = f"^{word}$"
+    return {padded[i : i + 3] for i in range(len(padded) - 2)}
+
+
+def edit_distance(left, right):
+    previous = list(range(len(right) + 1))
+    for i, a in enumerate(left, 1):
+        current = [i]
+        for j, b in enumerate(right, 1):
+            current.append(min(previous[j] + 1, current[-1] + 1, previous[j - 1] + (a != b)))
+        previous = current
+    return previous[-1]
+
+
+def fuzzy_rankers(docs):
+    """Offline scorers for the small, fully judged corpus."""
+    from collections import Counter, defaultdict
+
+    terms_by_doc = {}
+    vocabulary = set()
+    for doc in docs:
+        terms = engine.tokens(doc["text"])
+        terms_by_doc[doc["doc_id"]] = (set(terms), set(zip(terms, terms[1:])))
+        vocabulary.update(terms)
+    frequency = Counter(term for terms, _ in terms_by_doc.values() for term in terms)
+    gram_index = defaultdict(set)
+    for term in vocabulary:
+        if 4 <= len(term) <= 48:
+            for gram in trigrams(term):
+                gram_index[gram].add(term)
+
+    def rank(query):
+        terms = engine.tokens(query)
+        bigrams = set(zip(terms, terms[1:]))
+        weights = {term: math.log1p(len(docs) / (1 + frequency[term])) for term in set(terms)}
+        expansions = {}
+        for term in weights:
+            grams = trigrams(term) if 4 <= len(term) <= 48 else set()
+            candidates = set().union(*(gram_index[gram] for gram in grams))
+            near = set()
+            for candidate in candidates:
+                if candidate == term or abs(len(candidate) - len(term)) > 1:
+                    continue
+                other = trigrams(candidate)
+                if len(grams & other) / len(grams | other) >= 0.25 and edit_distance(term, candidate) == 1:
+                    near.add(candidate)
+            expansions[term] = near
+        word_scores = {}
+        fuzzy_scores = {}
+        for doc_id, (doc_terms, doc_bigrams) in terms_by_doc.items():
+            exact = doc_terms & weights.keys()
+            score = sum(weights[term] for term in sorted(exact))
+            word_scores[doc_id] = score + len(bigrams & doc_bigrams)
+            fuzzy_scores[doc_id] = score + sum(
+                0.5 * weights[term] for term in sorted(weights.keys() - exact)
+                if expansions[term] & doc_terms
+            )
+        return {
+            mode: sorted((doc for doc, score in scores.items() if score > 0),
+                         key=lambda doc: (-scores[doc], doc))
+            for mode, scores in (("word_bigrams", word_scores), ("trigram_edit1", fuzzy_scores))
+        }
+
+    return rank
+
+
 def evaluate(args):
     folder = Path(args.fixture).resolve()
     manifest = json.loads((folder / "frozen.json").read_text())
@@ -173,6 +240,8 @@ def evaluate(args):
         ]
     }
     rankings = {}
+    fuzzy = fuzzy_rankers(docs)
+    fuzzy_records = {"word_bigrams": [], "trigram_edit1": []}
     feature_rows = []
     for q in queries:
         for mode in records:
@@ -217,6 +286,8 @@ def evaluate(args):
             )
             records[mode].append(record)
             rankings[(q["id"], mode)] = order
+        for mode, order in fuzzy(q["query"]).items():
+            fuzzy_records[mode].append(metrics(order, q["relevant"], universe))
         # Same production features; zero for absent lexical/vector candidates.
         p = engine.plan({"query": q["query"]}, k)
         vectors, _ = engine.vector_candidates(str(folder / "index.sqlite"), {}, p)
@@ -375,6 +446,9 @@ def evaluate(args):
             name: interval_delta(rows, records["ranked_fts"], "ndcg_at_5")
             for name, rows in records.items()
             if name != "ranked_fts"
+        },
+        "offline_fuzzy_experiments": {
+            name: aggregate(rows) for name, rows in fuzzy_records.items()
         },
         "supervised": experiments,
         "features": engine.FEATURES,

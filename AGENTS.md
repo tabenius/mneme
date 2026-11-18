@@ -1,7 +1,7 @@
 # Mneme
 
 Read the parent workspace AGENTS.md. This repository owns a local session-history
-index and read-only MCP server, not authoritative transcripts or attestation.
+index and local MCP server with opt-in administration, not authoritative transcripts or attestation.
 
 - Never commit session data, credentials, host configuration, or private prompts.
 - All upstream access is GET-only. Never modify OpenCode's database.

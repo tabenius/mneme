@@ -12,7 +12,7 @@ than manufacturing a narrative of successful work.
 - Global live notifications and up to eight recent-session log followers.
 - Reconnect/backoff, periodic reconciliation, atomic snapshots and checkpoints.
 - SQLite WAL, FTS5, source-qualified identities and content-hash deduplication.
-- Eleven read-only stdio MCP tools, also callable from a JSON CLI.
+- Eleven history queries over stdio MCP and the JSON CLI, plus MCP instance administration.
 - Consistent, integrity-checked index snapshots (`mneme snapshot`) for owner-validated backup.
 - Curated concepts/entities, source-attributed assertions and Stockholm temporal interpretation.
 - Optional local TF-IDF/LSA and hybrid search, with measured retrieval quality and grouped SVM/tree evaluation.
@@ -101,9 +101,68 @@ by upstream session fields. No arbitrary SQL or arbitrary file-reading tool exis
 | `history_get_knowledge` | Curated concepts/entities and source-attributed assertions |
 
 Run `mneme --db /path/to/index.sqlite mcp` as a local stdio MCP server. Diagnostics
-go to stderr. Tool results carry both text and structured JSON. All tools are
-annotated read-only, non-destructive and closed-world. No administration tools
-are exposed to conversational clients.
+go to stderr. Tool results carry both text and structured JSON. The history
+queries remain read-only with respect to the index. Administrative writes
+require starting the local MCP process with `mcp --admin`.
+
+| Instance tool | Behavior |
+| --- | --- |
+| `history_instance_status` | Current coverage, settings, audit health and storage. Past search and evaluation statistics. Conditional growth projection and retrieval experiments. |
+| `history_update_settings` | Admin only. Atomically update `nostoi` and/or `profiling`. Changes apply to subsequent calls. |
+| `history_reclaim_space` | Estimate unused SQLite pages. Apply with `{"apply":true}` in admin mode with the collector stopped. Runs WAL truncation and compacts free pages while preserving rows. Temporary space can be required. |
+| `history_record_evaluation` | Admin only, profiling enabled. Record pooled TP, FP and FN at a fixed k from a labeled run. Precision and recall have null values for undefined denominators. |
+
+The settings file is `<index>.settings.json`. Both settings default to false.
+For example, in a local admin MCP session call `history_update_settings`
+with `{"nostoi":true,"profiling":true}`. Keep the index and its sidecars in
+a private directory and enable admin only for a trusted local client.
+
+### Nostoi receipts
+
+Install the Nostoi CLI on the MCP process's PATH and enable the setting through
+the admin tool to initialize the ledger. Mneme appends one salted request
+and response commitment to `<index>.nostoi.jsonl` before releasing the
+result of each of the eleven history queries, including query errors. The
+ledger records tool names and error flags with hashes. Receipt failure blocks
+delivery of the query result. JSON-RPC protocol errors, rejected overloads, CLI
+queries, collection and instance administration are outside this audit scope.
+
+Save the returned `_mneme_audit` receipt with the evidence you need to verify.
+Version 1 hashes the decoded 32-byte nonce, the ASCII domain `mneme/input/v1`
+or `mneme/output/v1`, and the compact UTF-8 `serde_json` encoding of the
+value with lexicographically ordered object keys. Use the parsed query object
+with top-level null fields removed for the input and structured output with
+`_mneme_audit` removed for the output. Compare the resulting hashes and error
+flag with the ledger record. Keep the receipt private alongside the evidence.
+
+To detect rollback or replacement of the entire local chain, periodically save
+a verified `nostoi head` or anchor to an independently controlled location
+and compare against that checkpoint. Mneme reports local chain verification.
+The audit sidecar grows with queries. Plan ledger rotation around verified
+checkpoints, and back up sidecars separately from Mneme index snapshots.
+
+### Profiling and retrieval experiments
+
+Opt-in profiling stores up to 10,000 search observations in a separate
+`<index>.profile.sqlite` table. It stores mode, latency, returned count,
+failure and index size. The separate evaluation table holds labeled-run
+aggregates. The status tool reports a 30-day linear projection after at least
+seven sampled days. Index and WAL sizes, collector workload and maintenance
+can change the estimate. Turning profiling off stops writes and preserves
+existing statistics.
+
+The frozen-corpus evaluator compares word bigrams and character trigram
+candidate expansion with edit distance one as offline experiments.
+Run `python3 scripts/check-retrieval.py --offline-fuzzy` for the synthetic
+original-query and one-substitution comparison. Existing
+live search modes are documented in [the retrieval evaluation](docs/RETRIEVAL-EVALUATION.md).
+For the next round, add typo, transposition, identifier, Swedish compound
+and no-answer slices. Compare per-slice precision, recall, nDCG and p95
+latency against ranked FTS and concept search under identical filters. Use
+query-family holdouts and pair results by family when estimating uncertainty.
+Evaluate POS features for phrase and entity extraction by language, with a
+dictionary baseline. Reserve HMM experiments for labeled sequence tasks
+such as intent transitions, with a simple transition-frequency baseline.
 
 ## Snapshots and backup
 
