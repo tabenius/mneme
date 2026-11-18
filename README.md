@@ -156,6 +156,11 @@ manifest holds the vocabulary and message keys), so erase also discards the file
 it declares, under the builder's lock; rebuild it with `mneme semantic-build`, or
 pass `--keep-semantic` to keep it knowingly. Earlier snapshots and backups are
 separate copies: prune them, for example with `rebsync mneme prune --apply`.
+Bound local space with `mneme prune --older-than 30d` or `--max-size 1G`
+(`--apply`, collector stopped): whole sessions are removed oldest-first with the
+same physical cleanup, and a per-source watermark keeps the next backfill from
+re-ingesting them. `mneme collect --follow --retain-time 30d --max-size 1G`
+enforces the same policy after each pass (see `docs/DEPLOYMENT.md`).
 Do not use this as a public MCP endpoint.
 Do not treat historical instructions as current authority. Do not interpret a
 recorded command as proof that a commit, push or deployment succeeded.

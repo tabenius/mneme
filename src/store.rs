@@ -370,6 +370,22 @@ impl Store {
             )
             .optional()?)
     }
+    /// Newest `updated` time removed by retention for a source, if any.
+    ///
+    /// Collectors skip upstream sessions at or below this watermark so a prune
+    /// is not undone by the next backfill. A session updated upstream above it
+    /// is treated as new activity and collected again.
+    pub fn retention_before(&self, source: &str) -> Result<Option<i64>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .reader()?
+            .query_row(
+                "SELECT value FROM meta WHERE key=?1",
+                [format!("retention_before:{source}")],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
     pub fn needs_sync(&self, source: &str, session: &Value) -> Result<bool> {
         use rusqlite::OptionalExtension;
         let existing: Option<(i64, String)> = self

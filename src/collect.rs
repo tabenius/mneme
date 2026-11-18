@@ -1,4 +1,4 @@
-use crate::{api::Api, store::Store};
+use crate::{api::Api, retain, store::Store};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use serde_json::Value;
@@ -23,7 +23,7 @@ pub async fn once(
     force: bool,
     allow_empty: bool,
 ) -> Result<Vec<Value>> {
-    let sessions = api.sessions().await?;
+    let mut sessions = api.sessions().await?;
     // An empty inventory hides every previously indexed session. Treat it as a
     // suspicious upstream result unless the operator explicitly allowed it.
     anyhow::ensure!(
@@ -35,6 +35,12 @@ pub async fn once(
         let sid = session["id"].as_str().context("session missing id")?;
         crate::api::validate_id(sid)?;
         anyhow::ensure!(ids.insert(sid), "Duplicate session in API inventory");
+    }
+    // Retention is a per-source policy: do not re-ingest history that was
+    // deliberately pruned. A session updated above the watermark counts as new
+    // activity upstream and is collected again.
+    if let Some(before) = store.retention_before(source)? {
+        retain::filter_inventory(&mut sessions, before);
     }
     let mut recent: Vec<&Value> = sessions.iter().collect();
     recent.sort_by_key(|s| {
@@ -87,11 +93,17 @@ pub async fn run(
     source: String,
     interval_secs: u64,
     allow_empty: bool,
+    mut retention: Option<crate::retain::Policy>,
 ) -> Result<()> {
     anyhow::ensure!(
         (2..=3600).contains(&interval_secs),
         "interval must be 2..3600 seconds"
     );
+    if let Some(policy) = &mut retention
+        && policy.source.is_none()
+    {
+        policy.source = Some(source.clone());
+    }
     store.init()?;
     let _lock = lock(&store)?;
     store.source(&source, "unknown")?;
@@ -161,6 +173,25 @@ pub async fn run(
                             tx.clone(),
                         )
                     });
+                }
+                if let Some(policy) = &retention {
+                    match retain::prune_locked(&store, policy, true, false) {
+                        Ok(report) => {
+                            let pruned = report["pruned"]["sessions"].as_u64().unwrap_or(0);
+                            if pruned > 0 {
+                                eprintln!("retention: {report}");
+                            }
+                        }
+                        Err(error) => {
+                            // Never fail the collector for a retention problem;
+                            // surface it in health and retry next pass.
+                            store.health(
+                                &source,
+                                Some("Retention failed; the index may exceed its bound"),
+                            )?;
+                            eprintln!("retention failed: {error}");
+                        }
+                    }
                 }
             }
             Err(error) => {

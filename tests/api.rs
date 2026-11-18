@@ -204,7 +204,14 @@ async fn collector_retries_initial_outage_and_recovers() {
     drop(listener);
     let api = Api::new(&format!("http://{address}"), &credential).unwrap();
     let store = Store::new(dir.path().join("index.sqlite"));
-    let collector = tokio::spawn(collect::run(api, store.clone(), "mock".into(), 2, true));
+    let collector = tokio::spawn(collect::run(
+        api,
+        store.clone(),
+        "mock".into(),
+        2,
+        true,
+        None,
+    ));
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(
         !collector.is_finished(),

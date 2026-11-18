@@ -157,6 +157,7 @@ private index data remains until explicitly deleted by the owner.
   reports `cleanup_pending: true` and the index is unhealthy until
   `mneme erase --hidden --apply` is rerun. Model-file removal failures abort
   before any index row is deleted, leaving the manifest intact for a retry.
+  `mneme prune --apply` uses the same marker and final cleanup.
 - MCP admits at most four concurrent query workers. Excess calls receive a
   retryable tool error. Semantic helpers have a 15-second deadline including
   input transfer, bounded output, and are killed/reaped on failure.
@@ -201,6 +202,57 @@ exposure is acceptable, then rebuild with `mneme semantic-build` when the
 erasure is complete). Snapshots and backups made earlier are not reachable and
 must be pruned separately. A dry run opens the index read-only and never creates
 or modifies files.
+
+### Bounding index space (retention)
+
+Retention is modelled on `journalctl --vacuum-time` / `--vacuum-size`: it is a
+policy, not a hard quota, and it removes whole sessions oldest-first rather than
+truncating a session.
+
+```sh
+mneme --db PATH prune --older-than 30d              # dry run: what would go
+mneme --db PATH prune --older-than 30d --apply      # requires the collector stopped
+mneme --db PATH prune --max-size 1G --apply         # keep the newest sessions near 1 GiB
+mneme --db PATH prune --older-than 30d --source local-opencode --apply
+mneme --db PATH prune --clear-retention --apply     # forget prune watermarks
+```
+
+Durations accept `s`, `m`/`min`, `h`, `d`, `w`, `mo`/`month` and `y` (`30d`,
+`1w`, `12h`). Sizes accept binary units (`1G`, `1GiB`, `500M`, `2T`) or a plain
+byte count. Both bounds may be combined; a session is removed when it is either
+too old or the oldest data must go to approach the size target. The size target
+is best-effort: if the remaining newest sessions alone exceed it, the report
+shows `target_met: false` and a warning instead of claiming success.
+
+Applying a prune runs the same physical cleanup as erasure (`secure_delete`,
+FTS merge, WAL truncation, `VACUUM`), so text no longer remains in free pages or
+the WAL, and it resumes from the `erase_pending` marker after an interruption. It
+also discards the semantic model before deleting rows because that model is
+derived from the pruned text; use `--keep-semantic` only if that exposure is
+acceptable, then rebuild with `mneme semantic-build`.
+
+Each applied prune records `retention_before:<source>` at the newest removed
+update time. The collector skips upstream sessions at or below that watermark,
+so the next backfill does not re-ingest pruned history. A session updated
+upstream after the watermark is treated as new activity and collected again.
+Because the comparison is strict, an upstream session that was never indexed and
+shares the exact millisecond boundary timestamp with a pruned session is also
+skipped; `--clear-retention` removes the watermarks if that history is wanted
+again. Sessions already hidden by upstream deletion are always pruned as well.
+
+The continuous collector accepts retention directly, and enforces it after each
+successful pass:
+
+```sh
+mneme collect --follow --retain-time 30d --max-size 1G ...
+# or set MNEME_RETAIN_TIME=30d and MNEME_MAX_SIZE=1G in the unit environment
+```
+
+A retention failure never stops collection; it marks source health degraded and
+retries on the next pass. `mneme prune` without `--apply` only reports. Snapshots
+and backups made before a prune still contain the removed sessions and must be
+pruned separately. Sessions already hidden by upstream deletion are erased by
+the next applied prune, regardless of the age or size bound.
 
 
 ## Optional semantic layer (0.2)

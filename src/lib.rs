@@ -4,6 +4,7 @@ pub mod collect;
 pub mod erase;
 pub mod evac;
 pub mod mcp;
+pub mod retain;
 pub mod semantic;
 pub mod store;
 

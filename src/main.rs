@@ -4,6 +4,7 @@ use ragbaz_mneme::{
     api::Api,
     archive, collect, erase, evac,
     mcp::History,
+    retain,
     store::{Query, Store, default_db},
 };
 use rmcp::ServiceExt;
@@ -42,6 +43,12 @@ enum Command {
         /// Permit an empty upstream session inventory (hides all indexed sessions).
         #[arg(long)]
         allow_empty_inventory: bool,
+        /// Remove sessions older than this after each pass (e.g. 30d, 1w, 12h).
+        #[arg(long, env = "MNEME_RETAIN_TIME", value_parser = retain::parse_age)]
+        retain_time: Option<i64>,
+        /// Keep the index near this size by pruning the oldest sessions (e.g. 1G).
+        #[arg(long, env = "MNEME_MAX_SIZE", value_parser = retain::parse_size)]
+        max_size: Option<u64>,
     },
     /// Run a read-only stdio MCP server. Never starts an ingestion worker.
     Mcp,
@@ -63,6 +70,27 @@ enum Command {
         /// Keep the semantic model even though it derives from erased text.
         #[arg(long)]
         keep_semantic: bool,
+    },
+    /// Bound index space by removing whole sessions, oldest first. Dry-run
+    /// unless --apply; requires the collector to be stopped.
+    Prune {
+        /// Remove sessions last updated before now minus this span (e.g. 30d, 1w).
+        #[arg(long, value_parser = retain::parse_age)]
+        older_than: Option<i64>,
+        /// Keep pruning the oldest sessions until the index fits this size (e.g. 1G).
+        #[arg(long, value_parser = retain::parse_size)]
+        max_size: Option<u64>,
+        /// Restrict the policy to one source instance.
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        apply: bool,
+        /// Keep the semantic model even though it derives from pruned text.
+        #[arg(long)]
+        keep_semantic: bool,
+        /// Remove retention watermarks so older sessions may be collected again.
+        #[arg(long)]
+        clear_retention: bool,
     },
     /// Consistent owner-produced index export, validation and restore.
     Snapshot {
@@ -163,6 +191,31 @@ async fn main() -> Result<()> {
                 serde_json::to_string(&erase::hidden(&store, apply, keep_semantic)?)?
             );
         }
+        Command::Prune {
+            older_than,
+            max_size,
+            source,
+            apply,
+            keep_semantic,
+            clear_retention,
+        } => {
+            let policy = retain::Policy {
+                older_than_ms: older_than,
+                max_bytes: max_size,
+                source: source.clone(),
+            };
+            let value = if clear_retention {
+                anyhow::ensure!(
+                    older_than.is_none() && max_size.is_none(),
+                    "--clear-retention cannot be combined with --older-than or --max-size"
+                );
+                retain::clear_retention(&store, source.as_deref(), apply)?
+            } else {
+                retain::require_bound(&policy)?;
+                retain::prune(&store, &policy, apply, keep_semantic)?
+            };
+            println!("{}", serde_json::to_string(&value)?);
+        }
         Command::Snapshot { command } => {
             let value = match command {
                 SnapshotCommand::Create { out } => archive::create(&store, &out)?,
@@ -182,20 +235,41 @@ async fn main() -> Result<()> {
             follow,
             interval,
             allow_empty_inventory,
+            retain_time,
+            max_size,
         } => {
             anyhow::ensure!(
                 !source.is_empty() && source.len() <= 128,
                 "source must contain 1..128 bytes"
             );
+            let retention = (retain_time.is_some() || max_size.is_some()).then(|| retain::Policy {
+                older_than_ms: retain_time,
+                max_bytes: max_size,
+                source: Some(source.clone()),
+            });
             let api = Api::new(&url, &password_file)?;
             if follow {
-                collect::run(api, store, source, interval, allow_empty_inventory).await?;
+                collect::run(
+                    api,
+                    store,
+                    source,
+                    interval,
+                    allow_empty_inventory,
+                    retention,
+                )
+                .await?;
             } else {
                 store.init()?;
                 let _lock = collect::lock(&store)?;
                 let info = api.verify().await?;
                 store.source(&source, info["version"].as_str().unwrap_or("unknown"))?;
                 collect::once(&api, &store, &source, true, allow_empty_inventory).await?;
+                if let Some(policy) = &retention {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&retain::prune_locked(&store, policy, true, false)?)?
+                    );
+                }
                 println!(
                     "{}",
                     store.query("history_index_status", &Query::default())?
