@@ -403,22 +403,32 @@ fn offline_verify_checks_complete_bundle_and_refuses_tampering() {
 
     let absent_db = dir.path().join("not-created.sqlite");
     let result = Command::new(env!("CARGO_BIN_EXE_mneme"))
-        .arg("--db").arg(&absent_db)
-        .args(["evac", "verify", "--bundle"]).arg(&path)
-        .output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        .arg("--db")
+        .arg(&absent_db)
+        .args(["evac", "verify", "--bundle"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     assert!(!absent_db.exists());
     let reported: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(reported["sha256"], built.sha256);
 
     let mut decoded = Vec::new();
     GzDecoder::new(fs::read(&path).unwrap().as_slice())
-        .read_to_end(&mut decoded).unwrap();
+        .read_to_end(&mut decoded)
+        .unwrap();
     let mut payload: Value = serde_json::from_slice(&decoded).unwrap();
     payload["mvhs"]["offline"]["state"] = json!("false assertion");
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     use std::io::Write;
-    encoder.write_all(&serde_json::to_vec(&payload).unwrap()).unwrap();
+    encoder
+        .write_all(&serde_json::to_vec(&payload).unwrap())
+        .unwrap();
     fs::write(&path, encoder.finish().unwrap()).unwrap();
     assert!(evac::inspect(&path).is_err());
 }
