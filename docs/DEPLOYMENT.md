@@ -220,7 +220,10 @@ mneme --db PATH prune --clear-retention --apply     # forget prune watermarks
 Durations accept `s`, `m`/`min`, `h`, `d`, `w`, `mo`/`month` and `y` (`30d`,
 `1w`, `12h`). Sizes accept binary units (`1G`, `1GiB`, `500M`, `2T`) or a plain
 byte count. Both bounds may be combined; a session is removed when it is either
-too old or the oldest data must go to approach the size target. The size target
+too old or the oldest data must go to approach the size target. Age always
+removes sessions beyond the span even when the index is small; size can remove
+sessions younger than the span when the index exceeds the cap. Neither bound
+overrides the other. The size target
 is best-effort: if the remaining newest sessions alone exceed it, the report
 shows `target_met: false` and a warning instead of claiming success.
 
