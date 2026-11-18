@@ -3,7 +3,7 @@ name = "ragbaz-mneme"
 version = "0.2.1"
 edition = "2024"
 description = "Local, evidence-oriented session history index and read-only MCP server"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "mneme"
